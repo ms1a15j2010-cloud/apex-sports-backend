@@ -1,15 +1,14 @@
-const express = require('express');
-const router = express.Router();
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-// Example route: GET /api/hello
-router.get('/hello', (req, res) => {
-  res.json({ message: 'Hello from API!' });
-});
+export async function getHelloMessage() {
+  const res = await fetch(`${API_BASE}/api/hello`, {
+    cache: "no-store",
+  });
 
-// Example route: POST /api/data
-router.post('/data', (req, res) => {
-  const { name, age } = req.body;
-  res.json({ message: `Received data: ${name}, ${age}` });
-});
+  if (!res.ok) {
+    throw new Error("Backend did not return JSON");
+  }
 
-module.exports = router;
+  return res.json();
+}
