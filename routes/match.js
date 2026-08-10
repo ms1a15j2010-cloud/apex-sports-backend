@@ -1,54 +1,119 @@
 const express = require("express");
-const fetch = require("node-fetch");
-require("dotenv").config();
 
 const router = express.Router();
 
-const API_KEY = process.env.API_FOOTBALL_KEY;
-const BASE_URL = "https://v3.football.api-football.com";
 
-/**
- * GET /api/match/:id
- * Returns ONE match object (or fallback)
- */
-router.get("/:id", async (req, res) => {
-  const { id } = req.params;
+/* =====================================================
+   MAIN MATCH
+===================================================== */
 
-  try {
-    const response = await fetch(`${BASE_URL}/fixtures?id=${id}`, {
-      headers: {
-        "x-apisports-key": API_KEY,
-      },
-    });
+const {
+  getMatch,
+} = require("../controllers/matchController");
 
-    const data = await response.json();
+/* =====================================================
+   EXISTING CONTROLLERS
+===================================================== */
 
-    if (!response.ok || !data.response || data.response.length === 0) {
-      throw new Error("No match found from API");
-    }
+const {
+  getEvents,
+} = require("../controllers/eventsController");
 
-    // ✅ Return SINGLE match
-    res.json(data.response[0]);
-  } catch (error) {
-    console.error("Match API failed, using fallback:", error.message);
+const {
+  getStatistics,
+} = require("../controllers/statisticsController");
 
-    // ✅ SAFE FALLBACK (unique per ID)
-    res.json({
-      fixture: {
-        id: Number(id),
-        status: { short: "NS" },
-        date: new Date().toISOString(),
-      },
-      teams: {
-        home: { name: `Team ${id}A` },
-        away: { name: `Team ${id}B` },
-      },
-      goals: {
-        home: 0,
-        away: 0,
-      },
-    });
-  }
-});
+const {
+  getLineups,
+} = require("../controllers/lineupsController");
+
+const {
+  getPlayerStatistics,
+} = require("../controllers/playersStatisticsController");
+
+/* =====================================================
+   NEW CONTROLLERS
+===================================================== */
+
+const {
+  getTimeline,
+} = require("../controllers/timelineController");
+
+const {
+  getFacts,
+} = require("../controllers/factsController");
+
+const {
+  getHeadToHead,
+} = require("../controllers/headToHeadController");
+
+const {
+  getStandings,
+} = require("../controllers/matchStandingsController");
+
+const {
+  getPrediction,
+} = require("../controllers/predictionController");
+
+/* =====================================================
+   MATCH DETAILS
+===================================================== */
+
+router.get("/:id", getMatch);
+
+/* =====================================================
+   EVENTS
+===================================================== */
+
+router.get("/:id/events", getEvents);
+
+/* =====================================================
+   TIMELINE
+===================================================== */
+
+router.get("/:id/timeline", getTimeline);
+
+/* =====================================================
+   STATISTICS
+===================================================== */
+
+router.get("/:id/statistics", getStatistics);
+
+/* =====================================================
+   LINEUPS
+===================================================== */
+
+router.get("/:id/lineups", getLineups);
+
+/* =====================================================
+   PLAYER RATINGS
+===================================================== */
+
+router.get("/:id/players", getPlayerStatistics);
+
+/* =====================================================
+   FACTS
+===================================================== */
+
+router.get("/:id/facts", getFacts);
+
+/* =====================================================
+   HEAD TO HEAD
+===================================================== */
+
+router.get("/:id/headtohead", getHeadToHead);
+
+/* =====================================================
+   STANDINGS
+===================================================== */
+
+router.get("/:id/standings", getStandings);
+
+/* =====================================================
+   PREDICTION
+===================================================== */
+
+router.get("/:id/prediction", getPrediction);
+
 
 module.exports = router;
