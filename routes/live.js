@@ -1,11 +1,23 @@
 const express = require("express");
 
-const router = express.Router();
-
 const {
   getLiveMatches,
-} = require("../controllers/liveController");
+} = require(
+  "../controllers/liveController"
+);
 
-router.get("/", getLiveMatches);
+const router =
+  express.Router();
+
+/* =====================================================
+LIVE ROUTE
+
+GET /api/live
+===================================================== */
+
+router.get(
+  "/",
+  getLiveMatches
+);
 
 module.exports = router;

@@ -1,21 +1,34 @@
-const { apiGet } = require("../services/footballApi");
+const {
+  searchFootball,
+} = require("../services/footballDataApi");
 
 /* =====================================================
-   GLOBAL SEARCH
+GLOBAL SEARCH
 ===================================================== */
 
-exports.searchFootball = async (req, res) => {
+exports.searchFootball = async (
+  req,
+  res
+) => {
   try {
-    const query = (req.query.q || "").trim();
+    const query = String(
+      req.query.q || ""
+    ).trim();
+
+    /* =================================================
+       EMPTY SEARCH
+    ================================================= */
 
     if (!query) {
       return res.json({
         success: true,
         query: "",
+
         teams: [],
         players: [],
         leagues: [],
         matches: [],
+
         count: {
           teams: 0,
           players: 0,
@@ -25,51 +38,60 @@ exports.searchFootball = async (req, res) => {
       });
     }
 
-    const [
-      teamsResult,
-      playersResult,
-      leaguesResult,
-      fixturesResult,
-    ] = await Promise.allSettled([
-      apiGet("/teams", {
-        search: query,
-      }),
+    console.log(
+      `🔎 Global search: "${query}"`
+    );
 
-      apiGet("/players", {
-        search: query,
-      }),
+    /* =================================================
+       SEARCH SERVICE
+    ================================================= */
 
-      apiGet("/leagues", {
-        search: query,
-      }),
+    const data =
+      await searchFootball(
+        query
+      );
 
-      apiGet("/fixtures", {
-        search: query,
-      }),
-    ]);
+    /* =================================================
+       SAFE ARRAYS
+    ================================================= */
 
     const teams =
-      teamsResult.status === "fulfilled"
-        ? teamsResult.value
+      Array.isArray(
+        data?.teams
+      )
+        ? data.teams
         : [];
 
     const players =
-      playersResult.status === "fulfilled"
-        ? playersResult.value
+      Array.isArray(
+        data?.players
+      )
+        ? data.players
         : [];
 
     const leagues =
-      leaguesResult.status === "fulfilled"
-        ? leaguesResult.value
+      Array.isArray(
+        data?.leagues
+      )
+        ? data.leagues
         : [];
 
     const matches =
-      fixturesResult.status === "fulfilled"
-        ? fixturesResult.value
+      Array.isArray(
+        data?.matches
+      )
+        ? data.matches
         : [];
+
+    /* =================================================
+       RESPONSE
+
+       Keep the existing frontend contract unchanged.
+    ================================================= */
 
     return res.json({
       success: true,
+
       query,
 
       teams,
@@ -84,13 +106,17 @@ exports.searchFootball = async (req, res) => {
         matches: matches.length,
       },
     });
-
   } catch (err) {
-    console.error("SearchController:", err.message);
+    console.error(
+      "❌ SearchController:",
+      err.message
+    );
 
     return res.status(500).json({
       success: false,
-      query: req.query.q || "",
+
+      query:
+        req.query.q || "",
 
       teams: [],
       players: [],
@@ -104,7 +130,8 @@ exports.searchFootball = async (req, res) => {
         matches: 0,
       },
 
-      message: "Unable to search football data",
+      message:
+        "Unable to search football data",
     });
   }
 };

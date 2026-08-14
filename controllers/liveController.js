@@ -1,200 +1,340 @@
-const { apiGet } = require("../services/footballApi");
-
-const formatFixture = require("../formatters/fixtureFormatter");
-
-/* =====================================================
-   LIVE FIXTURE STATUSES
-===================================================== */
-
-const LIVE_STATUSES =
-  "1H-HT-2H-ET-BT-P-SUSP-INT-LIVE";
+const {
+  getLiveMatches: getFootballDataLiveMatches,
+} = require("../services/footballDataApi");
 
 /* =====================================================
-   PAKISTAN DATE
+LIVE CONTROLLER
+
+Provider:
+football-data.org
+
+Endpoint:
+GET /api/live
 ===================================================== */
 
-function getPakistanDate() {
-  return new Intl.DateTimeFormat(
-    "en-CA",
-    {
-      timeZone: "Asia/Karachi",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }
-  ).format(new Date());
+function formatLiveMatch(match) {
+  if (!match) {
+    return null;
+  }
+
+  const homeTeam =
+    match.homeTeam || {};
+
+  const awayTeam =
+    match.awayTeam || {};
+
+  const status =
+    match.status || "IN_PLAY";
+
+  return {
+    id:
+      match.id ?? null,
+
+    fixture: {
+      id:
+        match.id ?? null,
+
+      date:
+        match.utcDate || null,
+
+      timestamp:
+        match.utcDate
+          ? Math.floor(
+              new Date(
+                match.utcDate
+              ).getTime() / 1000
+            )
+          : null,
+
+      venue: {
+        name:
+          match.venue ||
+          "Venue TBD",
+
+        city:
+          match.city ||
+          match.area?.name ||
+          "City TBD",
+      },
+    },
+
+    league: {
+      id:
+        match.competition?.id ??
+        2021,
+
+      name:
+        match.competition?.name ||
+        "Premier League",
+
+      code:
+        match.competition?.code ||
+        "PL",
+
+      country:
+        match.area?.name ||
+        "England",
+
+      logo:
+        match.competition?.emblem ||
+        "https://crests.football-data.org/PL.png",
+
+      flag:
+        match.area?.flag ||
+        null,
+
+      season:
+        match.season?.startDate
+          ? Number(
+              String(
+                match.season.startDate
+              ).substring(0, 4)
+            )
+          : null,
+    },
+
+    home: {
+      id:
+        homeTeam.id ?? null,
+
+      name:
+        homeTeam.name ||
+        homeTeam.shortName ||
+        "Home Team",
+
+      shortName:
+        homeTeam.shortName ||
+        null,
+
+      tla:
+        homeTeam.tla ||
+        null,
+
+      logo:
+        homeTeam.crest ||
+        null,
+    },
+
+    away: {
+      id:
+        awayTeam.id ?? null,
+
+      name:
+        awayTeam.name ||
+        awayTeam.shortName ||
+        "Away Team",
+
+      shortName:
+        awayTeam.shortName ||
+        null,
+
+      tla:
+        awayTeam.tla ||
+        null,
+
+      logo:
+        awayTeam.crest ||
+        null,
+    },
+
+    teams: {
+      home: {
+        id:
+          homeTeam.id ?? null,
+
+        name:
+          homeTeam.name ||
+          homeTeam.shortName ||
+          "Home Team",
+
+        logo:
+          homeTeam.crest ||
+          null,
+      },
+
+      away: {
+        id:
+          awayTeam.id ?? null,
+
+        name:
+          awayTeam.name ||
+          awayTeam.shortName ||
+          "Away Team",
+
+        logo:
+          awayTeam.crest ||
+          null,
+      },
+    },
+
+    status: {
+      short:
+        status === "IN_PLAY"
+          ? "LIVE"
+          : status === "PAUSED"
+          ? "HT"
+          : status,
+
+      long:
+        status,
+
+      elapsed:
+        null,
+    },
+
+    goals: {
+      home:
+        match.score?.fullTime
+          ?.home ?? null,
+
+      away:
+        match.score?.fullTime
+          ?.away ?? null,
+    },
+
+    score: {
+      home:
+        match.score?.fullTime
+          ?.home ?? null,
+
+      away:
+        match.score?.fullTime
+          ?.away ?? null,
+
+      halftime: {
+        home:
+          match.score?.halfTime
+            ?.home ?? null,
+
+        away:
+          match.score?.halfTime
+            ?.away ?? null,
+      },
+    },
+
+    rawStatus:
+      status,
+  };
 }
 
 /* =====================================================
-   LIVE MATCHES
+GET LIVE MATCHES
 ===================================================== */
 
-exports.getLiveMatches = async (
-  req,
-  res
-) => {
-  const leagueId =
-    req.query.league || null;
-
-  const season =
-    req.query.season || null;
-
-  try {
-    console.log(
-      "🔴 Loading live matches..."
-    );
-
-    /* ==========================================
-       PRIMARY REQUEST
-    ========================================== */
-
-    const liveParams = {
-      live: "all",
-    };
-
-    if (leagueId) {
-      liveParams.league =
-        leagueId;
-    }
-
-    if (season) {
-      liveParams.season =
-        season;
-    }
-
-    console.log(
-      "Live params:",
-      liveParams
-    );
-
-    let response =
-      await apiGet(
-        "/fixtures",
-        liveParams
+exports.getLiveMatches =
+  async (req, res) => {
+    try {
+      console.log(
+        "🔴 Loading live matches from football-data.org..."
       );
 
-    let source =
-      "live=all";
+      const rawMatches =
+        await getFootballDataLiveMatches();
 
-    /* ==========================================
-       FALLBACK REQUEST
-       
-       If live=all returns nothing,
-       check today's fixtures using
-       every known in-play status.
-    ========================================== */
-
-    if (
-      !Array.isArray(response) ||
-      response.length === 0
-    ) {
-      const today =
-        getPakistanDate();
-
-      const fallbackParams = {
-        date: today,
-        status: LIVE_STATUSES,
-        timezone:
-          "Asia/Karachi",
-      };
-
-      if (leagueId) {
-        fallbackParams.league =
-          leagueId;
-      }
-
-      if (season) {
-        fallbackParams.season =
-          season;
-      }
+      const matches =
+        Array.isArray(
+          rawMatches
+        )
+          ? rawMatches
+              .map(
+                formatLiveMatch
+              )
+              .filter(Boolean)
+          : [];
 
       console.log(
-        "🟡 Live fallback params:",
-        fallbackParams
+        `🔴 Football-data.org live matches received: ${matches.length}`
       );
 
-      const fallbackResponse =
-        await apiGet(
-          "/fixtures",
-          fallbackParams
-        );
+      return res.json({
+        success: true,
+
+        leagueId:
+          req.query.league ||
+          null,
+
+        season:
+          req.query.season ||
+          null,
+
+        count:
+          matches.length,
+
+        matches,
+
+        source:
+          "football-data.org",
+
+        message:
+          matches.length > 0
+            ? "Live matches loaded"
+            : "No live matches available",
+      });
+    } catch (error) {
+      console.error(
+        "❌ LiveController:",
+        error.response?.data ||
+          error.message
+      );
 
       if (
-        Array.isArray(
-          fallbackResponse
-        )
+        error.response?.status ===
+        429
       ) {
-        response =
-          fallbackResponse;
+        return res.status(
+          503
+        ).json({
+          success: false,
 
-        source =
-          "today+live-status";
+          leagueId:
+            req.query.league ||
+            null,
+
+          season:
+            req.query.season ||
+            null,
+
+          count: 0,
+
+          matches: [],
+
+          source:
+            "football-data.org",
+
+          apiLimitReached:
+            true,
+
+          message:
+            "Football-data.org request limit reached. Please try again later.",
+        });
       }
+
+      return res.status(
+        500
+      ).json({
+        success: false,
+
+        leagueId:
+          req.query.league ||
+          null,
+
+        season:
+          req.query.season ||
+          null,
+
+        count: 0,
+
+        matches: [],
+
+        source:
+          "football-data.org",
+
+        message:
+          "Unable to load live matches",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
     }
-
-    /* ==========================================
-       FORMAT MATCHES
-    ========================================== */
-
-    const matches =
-      Array.isArray(response)
-        ? response
-            .map(formatFixture)
-            .filter(
-              (match) =>
-                match?.fixture?.id
-            )
-        : [];
-
-    console.log(
-      `🔴 Live fixtures received: ${matches.length}`
-    );
-
-    /* ==========================================
-       RESPONSE
-    ========================================== */
-
-    return res.json({
-      success: true,
-
-      leagueId,
-
-      season,
-
-      count:
-        matches.length,
-
-      matches,
-
-      source,
-
-      message:
-        matches.length > 0
-          ? "Live matches loaded"
-          : "No live matches available",
-    });
-
-  } catch (err) {
-    console.error(
-      "LiveController:",
-      err.message
-    );
-
-    return res.status(500).json({
-      success: false,
-
-      leagueId,
-
-      season,
-
-      count: 0,
-
-      matches: [],
-
-      source: null,
-
-      message:
-        "Unable to load live matches",
-    });
-  }
-};
+  };

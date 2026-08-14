@@ -1,551 +1,1918 @@
-const { apiGet, getCurrentSeason } = require("../services/footballApi");
-const formatLeague = require("../formatters/leagueFormatter");
-const formatFixture = require("../formatters/fixtureFormatter");
-const { getLeagueId } = require("../utils/leagueMap");
+// controllers/leagueController.js
+
+const {
+  footballDataGet,
+  getFinishedMatches,
+  getCompetition,
+  getCompetitionTeams,
+  getPremierLeagueMatches,
+} = require("../services/footballDataApi");
+
+const {
+  getLeagueId,
+} = require("../utils/leagueMap");
+
 
 /* =========================================================
-   CACHE & HELPER FUNCTIONS
+HELPERS
 ========================================================= */
 
-function withTimeout(promise, ms = 15000) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`API timeout after ${ms}ms`)), ms);
-    }),
-  ]);
-}
+function resolveFootballDataSeason(requestedSeason) {
+  const season = parseInt(requestedSeason, 10);
 
-function getResponseData(response) {
-  if (!response) return [];
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response.response)) return response.response;
-  if (response.data && Array.isArray(response.data.response)) {
-    return response.data.response;
-  }
-  return [];
-}
-
-/* =========================================================
-   SEASON RESOLVER (Synchronous - No API calls)
-========================================================= */
-
-function resolveSeason(leagueId, requestedSeason) {
-  const MIN_SEASON = 2022;
-  const MAX_SEASON = 2024;
-
-  let season = Number(requestedSeason) || getCurrentSeason();
-
-  if (season > MAX_SEASON) {
-    console.log(
-      `⚠️ Requested season ${season} is newer than supported season ${MAX_SEASON}`
-    );
-    season = MAX_SEASON;
+  if (Number.isNaN(season)) {
+    return new Date().getFullYear();
   }
 
-  if (season < MIN_SEASON) {
-    season = MIN_SEASON;
-  }
-
-  console.log(`📅 Using season ${season} for league ${leagueId}`);
   return season;
 }
 
+
 /* =========================================================
-   SAFE API GET HELPER
+SUPPORTED LEAGUE CHECK
 ========================================================= */
 
-async function safeApiGet(endpoint, params, label) {
-  try {
-    console.log(`🔄 Loading ${label}...`);
-    const response = await withTimeout(apiGet(endpoint, params), 15000);
-    const data = getResponseData(response);
-    console.log(`✅ ${label}: ${data.length}`);
-    return data;
-  } catch (error) {
-    console.error(`❌ ${label} failed:`, error.message);
-    return [];
-  }
-}
+function isPremierLeague(value) {
+  const slug = String(value || "").toLowerCase();
 
-async function loadFixtures(leagueId, season, params = {}) {
-  return await safeApiGet(
-    "/fixtures",
-    { league: leagueId, season, ...params },
-    "Fixtures"
+  return (
+    slug === "epl" ||
+    slug === "premier-league" ||
+    slug === "39"
   );
 }
 
-async function loadPlayers(endpoint, leagueId, season, label) {
-  return await safeApiGet(endpoint, { league: leagueId, season }, label);
+
+/* =========================================================
+GET PREMIER LEAGUE ID
+========================================================= */
+
+function getPremierLeagueId() {
+  return 39;
 }
 
+
 /* =========================================================
-   GET LEAGUE
+FORMAT FOOTBALL-DATA TEAM
+
+Creates a stable structure for the existing frontend.
 ========================================================= */
 
-exports.getLeague = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
+function formatTeam(team) {
+  if (!team) {
+    return null;
+  }
 
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        league: null,
-        message: "Invalid league identifier",
-      });
-    }
+  return {
+    team: {
+      id: team.id ?? null,
 
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
+      name:
+        team.name ||
+        team.shortName ||
+        "Unknown Team",
 
-    console.log(`🏆 Loading league ${leagueId} | Season ${season}`);
+      code: team.tla || null,
 
-    // Single league request
-    const leagueResponse = await apiGet(
-      "/leagues",
-      { id: leagueId, season },
-      2,
-      { fullResponse: true }
-    );
+      country:
+        team.area?.name ||
+        "England",
 
-    // API Daily Limit Check
-    if (leagueResponse?.errors && Object.keys(leagueResponse.errors).length > 0) {
-      const requestError = String(
-        leagueResponse.errors?.requests || ""
-      ).toLowerCase();
+      founded: team.founded ?? null,
 
-      if (requestError.includes("request limit")) {
-        return res.status(503).json({
-          success: false,
-          season,
-          league: null,
-          apiLimitReached: true,
-          message:
-            "API-Football daily request limit reached. Please try again after the API quota resets.",
-        });
-      }
-    }
+      national: team.national ?? false,
 
-    const leagues = Array.isArray(leagueResponse?.response)
-      ? leagueResponse.response
+      logo: team.crest || null,
+
+      venue: team.venue || null,
+
+      address: team.address || null,
+
+      website: team.website || null,
+
+      colors: team.clubColors || null,
+    },
+
+    venue: {
+      name: team.venue || null,
+
+      address: team.address || null,
+
+      city: team.area?.name || null,
+
+      capacity: null,
+
+      image: null,
+    },
+
+    coach: null,
+
+    players:
+      Array.isArray(team.squad)
+        ? team.squad
+        : [],
+  };
+}
+
+
+/* =========================================================
+FORMAT FOOTBALL-DATA MATCH
+
+Normalizes football-data.org matches into the common
+Apex Sports fixture structure.
+========================================================= */
+
+function formatFootballDataMatch(match) {
+  if (!match) {
+    return null;
+  }
+
+  const homeScore =
+    match.score?.fullTime?.home;
+
+  const awayScore =
+    match.score?.fullTime?.away;
+
+  const status =
+    match.status || null;
+
+  return {
+    fixture: {
+      id: match.id ?? null,
+
+      date: match.utcDate || null,
+
+      timestamp:
+        match.utcDate
+          ? Math.floor(
+              new Date(match.utcDate).getTime() / 1000
+            )
+          : null,
+
+      status: {
+        short: status,
+
+        long: status,
+
+        elapsed: null,
+      },
+
+      venue: {
+        name: null,
+
+        city: null,
+      },
+
+      referee: null,
+    },
+
+    league: {
+      id:
+        match.competition?.id ??
+        2021,
+
+      name:
+        match.competition?.name ||
+        "Premier League",
+
+      country:
+        match.area?.name ||
+        "England",
+
+      logo:
+        match.competition?.emblem ||
+        "https://crests.football-data.org/PL.png",
+
+      code:
+        match.competition?.code ||
+        "PL",
+
+      season:
+        match.season?.startDate
+          ? parseInt(
+              match.season.startDate.slice(0, 4),
+              10
+            )
+          : null,
+    },
+
+    teams: {
+      home: {
+        id:
+          match.homeTeam?.id ??
+          null,
+
+        name:
+          match.homeTeam?.name ||
+          match.homeTeam?.shortName ||
+          "Home Team",
+
+        logo:
+          match.homeTeam?.crest ||
+          null,
+
+        winner:
+          typeof homeScore === "number" &&
+          typeof awayScore === "number"
+            ? homeScore > awayScore
+            : null,
+      },
+
+      away: {
+        id:
+          match.awayTeam?.id ??
+          null,
+
+        name:
+          match.awayTeam?.name ||
+          match.awayTeam?.shortName ||
+          "Away Team",
+
+        logo:
+          match.awayTeam?.crest ||
+          null,
+
+        winner:
+          typeof homeScore === "number" &&
+          typeof awayScore === "number"
+            ? awayScore > homeScore
+            : null,
+      },
+    },
+
+    goals: {
+      home: homeScore ?? null,
+
+      away: awayScore ?? null,
+    },
+
+    score: match.score || {},
+
+    raw: match,
+  };
+}
+
+
+/* =========================================================
+FORMAT STANDINGS
+========================================================= */
+
+function formatStandings(data) {
+  const tables =
+    Array.isArray(data?.standings)
+      ? data.standings
       : [];
 
-    if (leagues.length === 0) {
-      return res.status(404).json({
-        success: false,
-        season,
-        league: null,
-        message: "League not found for this season",
-      });
-    }
+  const totalTable =
+    tables.find(
+      (table) =>
+        table?.type === "TOTAL"
+    ) ||
+    tables[0];
 
-    const leagueInfo = leagues[0];
+  const table =
+    Array.isArray(totalTable?.table)
+      ? totalTable.table
+      : [];
 
-    // Load additional data independently
-    const [standings, scorers, assists, fixtures, teams] = await Promise.all([
-      safeApiGet("/standings", { league: leagueId, season }, "Standings"),
-      safeApiGet("/players/topscorers", { league: leagueId, season }, "Top Scorers"),
-      safeApiGet("/players/topassists", { league: leagueId, season }, "Top Assists"),
-      safeApiGet("/fixtures", { league: leagueId, season, last: 100 }, "Fixtures"),
-      safeApiGet("/teams", { league: leagueId, season }, "Teams"),
-    ]);
+  return table.map((team) => ({
+    rank: team.position,
 
-    const league = formatLeague(
-      leagueInfo,
-      standings,
-      scorers,
-      fixtures,
-      teams,
-      assists
-    );
+    id:
+      team.team?.id ??
+      null,
 
-    console.log("======================================");
-    console.log("📊 League Data Loaded");
-    console.log("League    :", leagueInfo.league?.name || leagueId);
-    console.log("League ID :", leagueId);
-    console.log("Season    :", season);
-    console.log("Standings :", standings.length);
-    console.log("Scorers   :", scorers.length);
-    console.log("Assists   :", assists.length);
-    console.log("Fixtures  :", fixtures.length);
-    console.log("Teams     :", teams.length);
-    console.log("======================================");
+    name:
+      team.team?.name ||
+      team.team?.shortName ||
+      "Unknown Team",
 
-    return res.json({
-      success: true,
-      season,
-      league,
-    });
-  } catch (error) {
-    console.error("🔥 getLeague Error:", error.message);
-    return res.status(500).json({
-      success: false,
-      season: null,
-      league: null,
-      message: "Unable to load league",
-    });
-  }
-};
+    shortName:
+      team.team?.shortName ||
+      null,
 
-/* =========================================================
-   GET FIXTURES
-========================================================= */
+    tla:
+      team.team?.tla ||
+      null,
 
-exports.getFixtures = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        fixtures: [],
-        message: "Invalid league identifier",
-      });
-    }
+    crest:
+      team.team?.crest ||
+      null,
 
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
+    played:
+      team.playedGames ??
+      0,
 
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 10;
+    win:
+      team.won ??
+      0,
 
-    const fixtures = await loadFixtures(leagueId, season, { last: 100 });
+    draw:
+      team.draw ??
+      0,
 
-    const formatted = fixtures
-      .map((fixture) => {
-        try {
-          return formatFixture(fixture);
-        } catch (error) {
-          console.error("❌ Fixture formatting error:", error.message);
-          return null;
-        }
-      })
-      .filter(Boolean);
+    lose:
+      team.lost ??
+      0,
 
-    const start = (page - 1) * limit;
-    const end = start + limit;
+    goalsFor:
+      team.goalsFor ??
+      0,
 
-    return res.json({
-      success: true,
-      season,
-      page,
-      limit,
-      total: formatted.length,
-      count: formatted.slice(start, end).length,
-      fixtures: formatted.slice(start, end),
-    });
-  } catch (error) {
-    console.error("🔥 getFixtures:", error.message);
-    return res.status(500).json({
-      success: false,
-      fixtures: [],
-      message: "Unable to load fixtures",
-    });
-  }
-};
+    goalsAgainst:
+      team.goalsAgainst ??
+      0,
+
+    goalDifference:
+      team.goalDifference ??
+      0,
+
+    points:
+      team.points ??
+      0,
+  }));
+}
+
 
 /* =========================================================
-   GET RESULTS
+FORMAT SCORERS
+
+football-data.org scorer data contains:
+
+- goals
+- assists
+- appearances
+- player information
+- team information
+
+This formatter creates the structure expected by Apex Sports.
 ========================================================= */
 
-exports.getResults = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        results: [],
-        message: "Invalid league identifier",
-      });
-    }
-
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
-
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 10;
-
-    const fixtures = await loadFixtures(leagueId, season, { last: 100 });
-
-    const formatted = fixtures
-      .map((fixture) => {
-        try {
-          return formatFixture(fixture);
-        } catch (error) {
-          console.error("❌ Result formatting error:", error.message);
-          return null;
-        }
-      })
-      .filter(Boolean);
-
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    const results = formatted.slice(start, end);
-
-    return res.json({
-      success: true,
-      season,
-      page,
-      limit,
-      total: formatted.length,
-      count: results.length,
-      results,
-    });
-  } catch (error) {
-    console.error("🔥 getResults:", error.message);
-    return res.status(500).json({
-      success: false,
-      results: [],
-      message: "Unable to load results",
-    });
+function formatScorers(data) {
+  if (
+    !Array.isArray(data?.scorers)
+  ) {
+    return [];
   }
-};
 
-/* =========================================================
-   GET STANDINGS
-========================================================= */
+  return data.scorers.map((scorer) => {
+    const player =
+      scorer.player ||
+      {};
 
-exports.getStandings = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        standings: [],
-        message: "Invalid league identifier",
-      });
-    }
+    const team =
+      scorer.team ||
+      {};
 
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
+    return {
+      player: {
+        id:
+          player.id ??
+          null,
 
-    const response = await safeApiGet(
-      "/standings",
-      { league: leagueId, season },
-      "Standings"
-    );
+        name:
+          player.name ||
+          "Unknown Player",
 
-    const table = response?.[0]?.league?.standings?.[0] || [];
+        firstName:
+          player.firstName ||
+          null,
 
-    return res.json({
-      success: true,
-      season,
-      count: table.length,
-      standings: table,
-    });
-  } catch (error) {
-    console.error("🔥 getStandings:", error.message);
-    return res.status(500).json({
-      success: false,
-      season: null,
-      standings: [],
-      message: "Unable to load standings",
-    });
-  }
-};
+        lastName:
+          player.lastName ||
+          null,
 
-/* =========================================================
-   GET TOP SCORERS
-========================================================= */
+        dateOfBirth:
+          player.dateOfBirth ||
+          null,
 
-exports.getTopScorers = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        players: [],
-        message: "Invalid league identifier",
-      });
-    }
+        nationality:
+          player.nationality ||
+          null,
 
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
+        position:
+          player.position ||
+          null,
 
-    const players = await loadPlayers(
-      "/players/topscorers",
-      leagueId,
-      season,
-      "Top Scorers"
-    );
+        photo:
+          null,
+      },
 
-    return res.json({
-      success: true,
-      season,
-      count: players.length,
-      players,
-    });
-  } catch (error) {
-    console.error("🔥 getTopScorers:", error.message);
-    return res.status(500).json({
-      success: false,
-      season: null,
-      players: [],
-      message: "Unable to load top scorers",
-    });
-  }
-};
+      statistics: [
+        {
+          team: {
+            id:
+              team.id ??
+              null,
 
-/* =========================================================
-   GET TOP ASSISTS
-========================================================= */
+            name:
+              team.name ||
+              team.shortName ||
+              "Unknown Team",
 
-exports.getTopAssists = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        players: [],
-        message: "Invalid league identifier",
-      });
-    }
+            logo:
+              team.crest ||
+              null,
+          },
 
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
+          games: {
+            appearances:
+              scorer.playedMatches ??
+              0,
 
-    const players = await loadPlayers(
-      "/players/topassists",
-      leagueId,
-      season,
-      "Top Assists"
-    );
+            appearences:
+              scorer.playedMatches ??
+              0,
+          },
 
-    return res.json({
-      success: true,
-      season,
-      count: players.length,
-      players,
-    });
-  } catch (error) {
-    console.error("🔥 getTopAssists:", error.message);
-    return res.status(500).json({
-      success: false,
-      season: null,
-      players: [],
-      message: "Unable to load top assists",
-    });
-  }
-};
+          goals: {
+            total:
+              scorer.goals ??
+              0,
 
-/* =========================================================
-   GET TEAMS
-========================================================= */
-
-exports.getTeams = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        teams: [],
-        message: "Invalid league identifier",
-      });
-    }
-
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
-
-    const teams = await safeApiGet(
-      "/teams",
-      { league: leagueId, season },
-      "Teams"
-    );
-
-    return res.json({
-      success: true,
-      season,
-      count: teams.length,
-      teams,
-    });
-  } catch (error) {
-    console.error("🔥 getTeams:", error.message);
-    return res.status(500).json({
-      success: false,
-      season: null,
-      teams: [],
-      message: "Unable to load teams",
-    });
-  }
-};
-
-/* =========================================================
-   GET STATISTICS
-========================================================= */
-
-exports.getStatistics = async (req, res) => {
-  try {
-    const leagueId = getLeagueId(req.params.id);
-    if (!leagueId) {
-      return res.status(400).json({
-        success: false,
-        statistics: {},
-        message: "Invalid league identifier",
-      });
-    }
-
-    const requestedSeason =
-      parseInt(req.query.season, 10) || getCurrentSeason();
-    const season = resolveSeason(leagueId, requestedSeason);
-
-    const fixtures = await loadFixtures(leagueId, season, { last: 300 });
-
-    const stats = {
-      matches: 0,
-      goals: 0,
-      homeGoals: 0,
-      awayGoals: 0,
-      homeWins: 0,
-      awayWins: 0,
-      draws: 0,
-      cleanSheets: 0,
-      avgGoals: 0,
-      highestScoringMatch: 0,
+            assists:
+              scorer.assists ??
+              0,
+          },
+        },
+      ],
     };
+  });
+}
 
-    fixtures.forEach((fixture) => {
-      const home = fixture.goals?.home ?? null;
-      const away = fixture.goals?.away ?? null;
 
-      if (home === null || away === null) return;
+/* =========================================================
+GET LEAGUE OVERVIEW
 
-      const totalGoals = home + away;
-      stats.matches++;
-      stats.goals += totalGoals;
-      stats.homeGoals += home;
-      stats.awayGoals += away;
+/api/league/epl
 
-      if (home > away) stats.homeWins++;
-      else if (away > home) stats.awayWins++;
-      else stats.draws++;
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
 
-      if (home === 0 || away === 0) stats.cleanSheets++;
-      if (totalGoals > stats.highestScoringMatch) stats.highestScoringMatch = totalGoals;
-    });
+exports.getLeague =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
 
-    if (stats.matches > 0) {
-      stats.avgGoals = Number((stats.goals / stats.matches).toFixed(2));
+          season: null,
+
+          league: null,
+
+          message:
+            "League currently supported for Premier League only",
+        });
+      }
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      const competition = "PL";
+
+      console.log(
+        `🏆 Loading Premier League overview | Season ${season}`
+      );
+
+      const [
+        competitionData,
+        teamsData,
+        fixturesData,
+        standingsData,
+        scorersData,
+      ] =
+        await Promise.all([
+          getCompetition(
+            competition
+          ),
+
+          getCompetitionTeams(
+            competition
+          ),
+
+          getPremierLeagueMatches({
+            season,
+          }),
+
+          footballDataGet(
+            "/competitions/PL/standings",
+            {
+              season,
+            }
+          ),
+
+          footballDataGet(
+            "/competitions/PL/scorers",
+            {
+              season,
+            }
+          ),
+        ]);
+
+      if (!competitionData) {
+        return res.status(404).json({
+          success: false,
+
+          season,
+
+          league: null,
+
+          message:
+            "Premier League not found",
+        });
+      }
+
+      /* =============================================
+         TEAMS
+      ============================================= */
+
+      const teams =
+        Array.isArray(
+          teamsData
+        )
+          ? teamsData
+              .map(formatTeam)
+              .filter(Boolean)
+          : [];
+
+
+      /* =============================================
+         FIXTURES
+      ============================================= */
+
+      const rawMatches =
+        Array.isArray(
+          fixturesData?.matches
+        )
+          ? fixturesData.matches
+          : [];
+
+      const fixtures =
+        rawMatches
+          .map(
+            formatFootballDataMatch
+          )
+          .filter(Boolean);
+
+
+      /* =============================================
+         STANDINGS
+      ============================================= */
+
+      const standings =
+        formatStandings(
+          standingsData
+        );
+
+
+      /* =============================================
+         TOP SCORERS
+      ============================================= */
+
+      const scorers =
+        formatScorers(
+          scorersData
+        );
+
+
+      /* =============================================
+         TOP ASSISTS
+
+         Same football-data.org scorer dataset,
+         sorted separately by assists.
+      ============================================= */
+
+      const assists =
+        [...scorers].sort(
+          (a, b) => {
+            const assistsA =
+              a
+                ?.statistics?.[0]
+                ?.goals?.assists ||
+              0;
+
+            const assistsB =
+              b
+                ?.statistics?.[0]
+                ?.goals?.assists ||
+              0;
+
+            return (
+              assistsB -
+              assistsA
+            );
+          }
+        );
+
+
+      /* =============================================
+         LEAGUE OBJECT
+      ============================================= */
+
+      const league = {
+        id:
+          competitionData.id ??
+          getPremierLeagueId(),
+
+        name:
+          competitionData.name ||
+          "Premier League",
+
+        code:
+          competitionData.code ||
+          "PL",
+
+        country:
+          competitionData.area?.name ||
+          "England",
+
+        logo:
+          competitionData.emblem ||
+          "https://crests.football-data.org/PL.png",
+
+        season,
+
+        currentSeason:
+          competitionData.currentSeason ||
+          null,
+
+        startDate:
+          competitionData.currentSeason
+            ?.startDate ||
+          null,
+
+        endDate:
+          competitionData.currentSeason
+            ?.endDate ||
+          null,
+
+        standings,
+
+        scorers,
+
+        assists,
+
+        fixtures,
+
+        teams,
+
+        raw:
+          competitionData,
+      };
+
+
+      console.log(
+        "======================================"
+      );
+
+      console.log(
+        "📊 Premier League Overview Loaded"
+      );
+
+      console.log(
+        "Source     : football-data.org"
+      );
+
+      console.log(
+        "Season     :",
+        season
+      );
+
+      console.log(
+        "Teams      :",
+        teams.length
+      );
+
+      console.log(
+        "Fixtures   :",
+        fixtures.length
+      );
+
+      console.log(
+        "Standings  :",
+        standings.length
+      );
+
+      console.log(
+        "Scorers    :",
+        scorers.length
+      );
+
+      console.log(
+        "Assists    :",
+        assists.length
+      );
+
+      console.log(
+        "======================================"
+      );
+
+
+      return res.json({
+        success: true,
+
+        season,
+
+        league,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Premier League overview loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getLeague football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      const status =
+        error.response?.status >= 400 &&
+        error.response?.status < 600
+          ? error.response.status
+          : 500;
+
+      return res.status(
+        status
+      ).json({
+        success: false,
+
+        season: null,
+
+        league: null,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Unable to load Premier League overview",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
     }
+  };
 
-    return res.json({
-      success: true,
-      season,
-      statistics: stats,
-    });
-  } catch (error) {
-    console.error("🔥 getStatistics:", error.message);
-    return res.status(500).json({
-      success: false,
-      season: null,
-      statistics: {},
-      message: "Unable to load league statistics",
-    });
-  }
-};
+
+/* =========================================================
+GET FIXTURES
+
+/api/league/epl/fixtures
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
+
+exports.getFixtures =
+  async (req, res) => {
+    try {
+      const leagueId =
+        String(
+          req.params.id ||
+            ""
+        ).toLowerCase();
+
+      if (
+        leagueId !== "epl" &&
+        leagueId !== "premier-league"
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          fixtures: [],
+
+          message:
+            "Fixtures currently supported for Premier League only",
+        });
+      }
+
+      const page =
+        parseInt(
+          req.query.page,
+          10
+        ) || 1;
+
+      const limit =
+        parseInt(
+          req.query.limit,
+          10
+        ) || 10;
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `📅 Loading Premier League fixtures | Season ${season}`
+      );
+
+      const data =
+        await getPremierLeagueMatches({
+          season,
+        });
+
+      let matches =
+        Array.isArray(
+          data?.matches
+        )
+          ? data.matches
+          : [];
+
+      matches =
+        matches
+          .map(
+            formatFootballDataMatch
+          )
+          .filter(Boolean);
+
+      const start =
+        (page - 1) *
+        limit;
+
+      const end =
+        start + limit;
+
+      const paginatedFixtures =
+        matches.slice(
+          start,
+          end
+        );
+
+      console.log(
+        `✅ Fixtures loaded | Season ${season} | Total ${matches.length} | Page ${page}`
+      );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        page,
+
+        limit,
+
+        total:
+          matches.length,
+
+        count:
+          paginatedFixtures.length,
+
+        fixtures:
+          paginatedFixtures,
+
+        source:
+          "football-data.org",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getFixtures football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        fixtures: [],
+
+        message:
+          "Unable to load Premier League fixtures",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };
+
+
+/* =========================================================
+GET RESULTS
+
+/api/league/epl/results
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
+
+exports.getResults =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          season: null,
+
+          page: 1,
+
+          limit: 10,
+
+          total: 0,
+
+          count: 0,
+
+          results: [],
+
+          message:
+            "Results currently supported for Premier League only",
+        });
+      }
+
+      const page =
+        parseInt(
+          req.query.page,
+          10
+        ) || 1;
+
+      const limit =
+        parseInt(
+          req.query.limit,
+          10
+        ) || 10;
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `📊 Loading Premier League results | Season ${season}`
+      );
+
+      let matches =
+        await getFinishedMatches({
+          season,
+        });
+
+      if (
+        !Array.isArray(
+          matches
+        )
+      ) {
+        matches = [];
+      }
+
+      matches =
+        matches.filter(
+          (match) =>
+            match?.status ===
+            "FINISHED"
+        );
+
+      const seasonStart =
+        new Date(
+          `${season}-07-01T00:00:00Z`
+        );
+
+      const seasonEnd =
+        new Date(
+          `${season + 1}-06-30T23:59:59Z`
+        );
+
+      matches =
+        matches.filter(
+          (match) => {
+            if (
+              !match?.utcDate
+            ) {
+              return false;
+            }
+
+            const date =
+              new Date(
+                match.utcDate
+              );
+
+            return (
+              date >= seasonStart &&
+              date <= seasonEnd
+            );
+          }
+        );
+
+      matches =
+        [...matches].sort(
+          (a, b) =>
+            new Date(
+              b.utcDate
+            ) -
+            new Date(
+              a.utcDate
+            )
+        );
+
+      const start =
+        (page - 1) *
+        limit;
+
+      const end =
+        start + limit;
+
+      const results =
+        matches.slice(
+          start,
+          end
+        );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        page,
+
+        limit,
+
+        total:
+          matches.length,
+
+        count:
+          results.length,
+
+        results,
+
+        source:
+          "football-data.org",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getResults football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        season: null,
+
+        page: 1,
+
+        limit: 10,
+
+        total: 0,
+
+        count: 0,
+
+        results: [],
+
+        message:
+          "Unable to load Premier League results",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };
+
+
+/* =========================================================
+GET STANDINGS
+
+/api/league/epl/standings
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
+
+exports.getStandings =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          season: null,
+
+          count: 0,
+
+          standings: [],
+
+          message:
+            "Standings currently supported for Premier League only",
+        });
+      }
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `📊 Loading Premier League standings | Season ${season}`
+      );
+
+      const data =
+        await footballDataGet(
+          "/competitions/PL/standings",
+          {
+            season,
+          }
+        );
+
+      const standings =
+        formatStandings(
+          data
+        );
+
+      if (
+        standings.length === 0
+      ) {
+        return res.json({
+          success: false,
+
+          season,
+
+          count: 0,
+
+          standings: [],
+
+          message:
+            "No standings available",
+
+          source:
+            "football-data.org",
+        });
+      }
+
+      return res.json({
+        success: true,
+
+        season,
+
+        league: {
+          id:
+            getPremierLeagueId(),
+
+          code:
+            "PL",
+
+          name:
+            "Premier League",
+        },
+
+        count:
+          standings.length,
+
+        standings,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Standings loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getStandings football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        season: null,
+
+        count: 0,
+
+        standings: [],
+
+        message:
+          "Unable to load Premier League standings",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };
+
+
+/* =========================================================
+GET TOP SCORERS
+
+/api/league/epl/topscorers
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
+
+exports.getTopScorers =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          season: null,
+
+          page: 1,
+
+          limit: 20,
+
+          total: 0,
+
+          count: 0,
+
+          players: [],
+
+          message:
+            "Top scorers currently supported for Premier League only",
+        });
+      }
+
+      const page =
+        parseInt(
+          req.query.page,
+          10
+        ) || 1;
+
+      const limit =
+        parseInt(
+          req.query.limit,
+          10
+        ) || 20;
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `🎯 Loading Premier League top scorers | Season ${season}`
+      );
+
+      const data =
+        await footballDataGet(
+          "/competitions/PL/scorers",
+          {
+            season,
+          }
+        );
+
+      const players =
+        formatScorers(
+          data
+        );
+
+      players.sort(
+        (a, b) => {
+          const goalsA =
+            a
+              ?.statistics?.[0]
+              ?.goals?.total ||
+            0;
+
+          const goalsB =
+            b
+              ?.statistics?.[0]
+              ?.goals?.total ||
+            0;
+
+          return (
+            goalsB -
+            goalsA
+          );
+        }
+      );
+
+      const total =
+        players.length;
+
+      const start =
+        (page - 1) *
+        limit;
+
+      const end =
+        start + limit;
+
+      const paginatedPlayers =
+        players.slice(
+          start,
+          end
+        );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        page,
+
+        limit,
+
+        total,
+
+        count:
+          paginatedPlayers.length,
+
+        players:
+          paginatedPlayers,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Top scorers loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getTopScorers football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        season: null,
+
+        page: 1,
+
+        limit: 20,
+
+        total: 0,
+
+        count: 0,
+
+        players: [],
+
+        message:
+          "Unable to load Premier League top scorers",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };
+
+
+/* =========================================================
+GET TOP ASSISTS
+
+/api/league/epl/topassists
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+
+IMPORTANT:
+
+football-data.org does not have a separate
+/topassists endpoint.
+
+The assists are included in:
+
+/competitions/PL/scorers
+
+Therefore we retrieve the scorer dataset and
+sort it by:
+
+player -> statistics -> goals -> assists
+========================================================= */
+
+exports.getTopAssists =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          season: null,
+
+          page: 1,
+
+          limit: 20,
+
+          total: 0,
+
+          count: 0,
+
+          players: [],
+
+          message:
+            "Top assists currently supported for Premier League only",
+        });
+      }
+
+      const page =
+        parseInt(
+          req.query.page,
+          10
+        ) || 1;
+
+      const limit =
+        parseInt(
+          req.query.limit,
+          10
+        ) || 20;
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `🎯 Loading Premier League top assists | Season ${season}`
+      );
+
+      /* =============================================
+         LOAD FOOTBALL-DATA SCORERS
+
+         Assists are included in scorer records.
+      ============================================= */
+
+      const data =
+        await footballDataGet(
+          "/competitions/PL/scorers",
+          {
+            season,
+          }
+        );
+
+      /* =============================================
+         FORMAT PLAYERS
+      ============================================= */
+
+      const players =
+        formatScorers(
+          data
+        );
+
+      /* =============================================
+         SORT BY ASSISTS
+
+         Highest assists first.
+      ============================================= */
+
+      players.sort(
+        (a, b) => {
+          const assistsA =
+            Number(
+              a
+                ?.statistics?.[0]
+                ?.goals?.assists ||
+              0
+            );
+
+          const assistsB =
+            Number(
+              b
+                ?.statistics?.[0]
+                ?.goals?.assists ||
+              0
+            );
+
+          return (
+            assistsB -
+            assistsA
+          );
+        }
+      );
+
+      /* =============================================
+         PAGINATION
+      ============================================= */
+
+      const total =
+        players.length;
+
+      const start =
+        (page - 1) *
+        limit;
+
+      const end =
+        start + limit;
+
+      const paginatedPlayers =
+        players.slice(
+          start,
+          end
+        );
+
+      console.log(
+        `✅ Top assists loaded | Season ${season} | Total ${total} | Page ${page}`
+      );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        page,
+
+        limit,
+
+        total,
+
+        count:
+          paginatedPlayers.length,
+
+        players:
+          paginatedPlayers,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Top assists loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getTopAssists football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        season: null,
+
+        page: 1,
+
+        limit: 20,
+
+        total: 0,
+
+        count: 0,
+
+        players: [],
+
+        source:
+          "football-data.org",
+
+        message:
+          "Unable to load Premier League top assists",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };
+
+
+/* =========================================================
+GET TEAMS
+
+/api/league/epl/teams
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
+
+exports.getTeams =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          season: null,
+
+          count: 0,
+
+          teams: [],
+
+          message:
+            "Teams currently supported for Premier League only",
+        });
+      }
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `🏟️ Loading Premier League teams | Season ${season}`
+      );
+
+      const teamsData =
+        await getCompetitionTeams(
+          "PL"
+        );
+
+      const teams =
+        Array.isArray(
+          teamsData
+        )
+          ? teamsData
+              .map(formatTeam)
+              .filter(Boolean)
+          : [];
+
+      console.log(
+        `✅ Premier League teams loaded | ${teams.length} teams`
+      );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        league: {
+          id:
+            getPremierLeagueId(),
+
+          code:
+            "PL",
+
+          name:
+            "Premier League",
+        },
+
+        count:
+          teams.length,
+
+        teams,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Premier League teams loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getTeams football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        season: null,
+
+        count: 0,
+
+        teams: [],
+
+        source:
+          "football-data.org",
+
+        message:
+          "Unable to load Premier League teams",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };
+
+
+/* =========================================================
+GET STATISTICS
+
+/api/league/epl/statistics
+
+FULLY MIGRATED TO FOOTBALL-DATA.ORG
+========================================================= */
+
+exports.getStatistics =
+  async (req, res) => {
+    try {
+      if (
+        !isPremierLeague(
+          req.params.id
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          season: null,
+
+          statistics: {},
+
+          message:
+            "Statistics currently supported for Premier League only",
+        });
+      }
+
+      const season =
+        resolveFootballDataSeason(
+          req.query.season
+        );
+
+      console.log(
+        `📊 Loading Premier League statistics | Season ${season}`
+      );
+
+      const data =
+        await getPremierLeagueMatches({
+          season,
+        });
+
+      let matches =
+        Array.isArray(
+          data?.matches
+        )
+          ? data.matches
+          : [];
+
+      /* =============================================
+         ONLY MATCHES WITH FINAL SCORES
+      ============================================= */
+
+      matches =
+        matches.filter(
+          (match) => {
+            const home =
+              match.score
+                ?.fullTime
+                ?.home;
+
+            const away =
+              match.score
+                ?.fullTime
+                ?.away;
+
+            return (
+              typeof home ===
+                "number" &&
+              typeof away ===
+                "number"
+            );
+          }
+        );
+
+      const stats = {
+        matches: 0,
+
+        goals: 0,
+
+        homeGoals: 0,
+
+        awayGoals: 0,
+
+        homeWins: 0,
+
+        awayWins: 0,
+
+        draws: 0,
+
+        cleanSheets: 0,
+
+        avgGoals: 0,
+
+        highestScoringMatch: 0,
+      };
+
+      /* =============================================
+         CALCULATE STATISTICS
+      ============================================= */
+
+      matches.forEach(
+        (match) => {
+          const home =
+            match.score
+              ?.fullTime
+              ?.home;
+
+          const away =
+            match.score
+              ?.fullTime
+              ?.away;
+
+          if (
+            typeof home !==
+              "number" ||
+            typeof away !==
+              "number"
+          ) {
+            return;
+          }
+
+          const totalGoals =
+            home + away;
+
+          stats.matches++;
+
+          stats.goals +=
+            totalGoals;
+
+          stats.homeGoals +=
+            home;
+
+          stats.awayGoals +=
+            away;
+
+          if (
+            home > away
+          ) {
+            stats.homeWins++;
+          } else if (
+            away > home
+          ) {
+            stats.awayWins++;
+          } else {
+            stats.draws++;
+          }
+
+          if (
+            home === 0 ||
+            away === 0
+          ) {
+            stats.cleanSheets++;
+          }
+
+          if (
+            totalGoals >
+            stats.highestScoringMatch
+          ) {
+            stats.highestScoringMatch =
+              totalGoals;
+          }
+        }
+      );
+
+      /* =============================================
+         AVERAGE GOALS
+      ============================================= */
+
+      if (
+        stats.matches > 0
+      ) {
+        stats.avgGoals =
+          Number(
+            (
+              stats.goals /
+              stats.matches
+            ).toFixed(2)
+          );
+      }
+
+      console.log(
+        `✅ Premier League statistics loaded | Season ${season} | ${stats.matches} completed matches`
+      );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        statistics:
+          stats,
+
+        source:
+          "football-data.org",
+
+        message:
+          "Premier League statistics loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ getStatistics football-data.org:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        season: null,
+
+        statistics: {},
+
+        source:
+          "football-data.org",
+
+        message:
+          "Unable to load Premier League statistics",
+
+        error:
+          error.response?.data ||
+          error.message,
+      });
+    }
+  };

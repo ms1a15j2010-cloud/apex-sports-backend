@@ -1,389 +1,1365 @@
-const { apiGet } = require("../services/footballApi");
-const formatTeam = require("../formatters/teamFormatter");
+// controllers/teamController.js
+
+const {
+  footballDataGet,
+} = require("../services/footballDataApi");
 
 /* =====================================================
-   TEAM PROFILE
+CONFIGURATION
 ===================================================== */
 
-exports.getTeam = async (req, res) => {
-  try {
-    const teamId = req.params.id;
-    const season = Number(req.query.season) || 2023;
-    const league = Number(req.query.league) || 39;
+const DEFAULT_SEASON = 2025;
 
-    const [
-      teamInfo,
-      statistics,
+const LEAGUES = {
+  epl: {
+    code: "PL",
+    id: 2021,
+    name: "Premier League",
+    country: "England",
+  },
+};
+
+/* =====================================================
+SEASON RESOLVER
+
+football-data.org:
+
+2024 = 2024/25
+2025 = 2025/26
+2026 = 2026/27
+===================================================== */
+
+function resolveSeason(value) {
+  const season = parseInt(value, 10);
+
+  if (
+    !Number.isNaN(season) &&
+    season >= 2000 &&
+    season <= 2100
+  ) {
+    return season;
+  }
+
+  return DEFAULT_SEASON;
+}
+
+/* =====================================================
+SAFE NUMBER
+===================================================== */
+
+function num(value) {
+  const n = Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : 0;
+}
+
+/* =====================================================
+SEASON DATE RANGE
+===================================================== */
+
+function getSeasonDates(season) {
+  return {
+    dateFrom:
+      `${season}-07-01`,
+
+    dateTo:
+      `${season + 1}-06-30`,
+  };
+}
+
+/* =====================================================
+GET TEAM DATA
+
+football-data.org:
+
+/teams/:id
+===================================================== */
+
+async function loadTeam(teamId) {
+  console.log(
+    `🌍 Football-data.org team profile: /teams/${teamId}`
+  );
+
+  return await footballDataGet(
+    `/teams/${teamId}`
+  );
+}
+
+/* =====================================================
+GET TEAM MATCHES
+
+football-data.org:
+
+/teams/:id/matches
+===================================================== */
+
+async function loadTeamMatches(
+  teamId,
+  season,
+  options = {}
+) {
+  const dates =
+    getSeasonDates(season);
+
+  const params = {
+    dateFrom:
+      dates.dateFrom,
+
+    dateTo:
+      dates.dateTo,
+
+    limit:
+      options.limit || 100,
+  };
+
+  if (options.status) {
+    params.status =
+      options.status;
+  }
+
+  console.log(
+    `🌍 Football-data.org team matches: /teams/${teamId}/matches`
+  );
+
+  console.log(
+    "Football-data.org team match params:",
+    params
+  );
+
+  return await footballDataGet(
+    `/teams/${teamId}/matches`,
+    params
+  );
+}
+
+/* =====================================================
+NORMALIZE TEAM
+
+Produces the structure expected by the current
+Apex Sports Team components.
+===================================================== */
+
+function normalizeTeam(
+  team,
+  season,
+  players = [],
+  fixtures = []
+) {
+  if (!team) {
+    return null;
+  }
+
+  const coach =
+    team.coach || null;
+
+  const venue =
+    team.venue || null;
+
+  const area =
+    team.area || {};
+
+  const competitions =
+    Array.isArray(
+      team.runningCompetitions
+    )
+      ? team.runningCompetitions
+      : [];
+
+  return {
+    id:
+      team.id ?? null,
+
+    name:
+      team.name ||
+      "Unknown Team",
+
+    shortName:
+      team.shortName ||
+      team.name ||
+      "",
+
+    tla:
+      team.tla ||
+      "",
+
+    crest:
+      team.crest ||
+      null,
+
+    logo:
+      team.crest ||
+      null,
+
+    founded:
+      team.founded ||
+      null,
+
+    address:
+      team.address ||
+      null,
+
+    website:
+      team.website ||
+      null,
+
+    clubColors:
+      team.clubColors ||
+      null,
+
+    country:
+      area.name ||
+      "England",
+
+    area: {
+      id:
+        area.id ??
+        null,
+
+      name:
+        area.name ||
+        null,
+
+      code:
+        area.code ||
+        null,
+
+      flag:
+        area.flag ||
+        null,
+    },
+
+    venue: {
+      name:
+        venue?.name ||
+        null,
+
+      address:
+        venue?.address ||
+        null,
+
+      city:
+        venue?.city ||
+        null,
+    },
+
+    coach: coach
+      ? {
+          id:
+            coach.id ??
+            null,
+
+          firstName:
+            coach.firstName ||
+            null,
+
+          lastName:
+            coach.lastName ||
+            null,
+
+          name:
+            [
+              coach.firstName,
+              coach.lastName,
+            ]
+              .filter(Boolean)
+              .join(" ") ||
+            coach.name ||
+            null,
+
+          dateOfBirth:
+            coach.dateOfBirth ||
+            null,
+
+          nationality:
+            coach.nationality ||
+            null,
+        }
+      : null,
+
+    players,
+
+    squad:
       players,
-      fixtures,
-      transfers,
-      coach,
-      injuries,
-      trophies,
-    ] = await Promise.all([
-      apiGet("/teams", { id: teamId }),
-      apiGet("/teams/statistics", {
-        team: teamId,
-        league,
-        season,
-      }),
-      apiGet("/players", {
-        team: teamId,
-        season,
-      }),
-      apiGet("/fixtures", {
-        team: teamId,
-        season,
-        last: 10,
-      }),
-      apiGet("/transfers", {
-        team: teamId,
-      }),
-      apiGet("/coachs", {
-        team: teamId,
-      }),
-      apiGet("/injuries", {
-        team: teamId,
-        league,
-        season,
-      }),
-      apiGet("/trophies", {
-        team: teamId,
-      }),
-    ]);
 
-    if (!teamInfo || teamInfo.length === 0) {
-      return res.status(404).json({
+    fixtures,
+
+    competitions,
+
+    season,
+  };
+}
+
+/* =====================================================
+NORMALIZE PLAYERS
+
+football-data.org team resource provides squad data.
+===================================================== */
+
+function normalizePlayers(
+  squad,
+  team
+) {
+  if (
+    !Array.isArray(squad)
+  ) {
+    return [];
+  }
+
+  return squad.map(
+    (player) => ({
+      player: {
+        id:
+          player?.id ??
+          null,
+
+        name:
+          player?.name ||
+          "Unknown Player",
+
+        firstName:
+          player?.firstName ||
+          null,
+
+        lastName:
+          player?.lastName ||
+          null,
+
+        dateOfBirth:
+          player?.dateOfBirth ||
+          null,
+
+        nationality:
+          player?.nationality ||
+          null,
+
+        position:
+          player?.position ||
+          null,
+
+        shirtNumber:
+          player?.shirtNumber ??
+          null,
+      },
+
+      team: {
+        id:
+          team?.id ??
+          null,
+
+        name:
+          team?.name ||
+          "Unknown Team",
+
+        logo:
+          team?.crest ||
+          null,
+      },
+
+      statistics: [],
+    })
+  );
+}
+
+/* =====================================================
+NORMALIZE FIXTURE
+
+Convert football-data.org match format into a structure
+that existing Apex Sports components can understand.
+===================================================== */
+
+function normalizeFixture(
+  match
+) {
+  if (!match) {
+    return null;
+  }
+
+  const fullTime =
+    match.score?.fullTime ||
+    {};
+
+  return {
+    id:
+      match.id ??
+      null,
+
+    utcDate:
+      match.utcDate ||
+      null,
+
+    status:
+      match.status ||
+      null,
+
+    stage:
+      match.stage ||
+      null,
+
+    group:
+      match.group ||
+      null,
+
+    homeTeam: {
+      id:
+        match.homeTeam?.id ??
+        null,
+
+      name:
+        match.homeTeam?.name ||
+        "Home Team",
+
+      shortName:
+        match.homeTeam?.shortName ||
+        null,
+
+      tla:
+        match.homeTeam?.tla ||
+        null,
+
+      crest:
+        match.homeTeam?.crest ||
+        null,
+
+      logo:
+        match.homeTeam?.crest ||
+        null,
+    },
+
+    awayTeam: {
+      id:
+        match.awayTeam?.id ??
+        null,
+
+      name:
+        match.awayTeam?.name ||
+        "Away Team",
+
+      shortName:
+        match.awayTeam?.shortName ||
+        null,
+
+      tla:
+        match.awayTeam?.tla ||
+        null,
+
+      crest:
+        match.awayTeam?.crest ||
+        null,
+
+      logo:
+        match.awayTeam?.crest ||
+        null,
+    },
+
+    competition: {
+      id:
+        match.competition?.id ??
+        null,
+
+      name:
+        match.competition?.name ||
+        "Premier League",
+
+      code:
+        match.competition?.code ||
+        "PL",
+
+      emblem:
+        match.competition?.emblem ||
+        null,
+    },
+
+    score: {
+      fullTime: {
+        home:
+          fullTime.home ??
+          null,
+
+        away:
+          fullTime.away ??
+          null,
+      },
+
+      halfTime: {
+        home:
+          match.score?.halfTime
+            ?.home ??
+          null,
+
+        away:
+          match.score?.halfTime
+            ?.away ??
+          null,
+      },
+    },
+
+    venue: {
+      name:
+        match.venue?.name ||
+        null,
+
+      city:
+        match.venue?.city ||
+        null,
+    },
+  };
+}
+
+/* =====================================================
+GET TEAM
+===================================================== */
+
+exports.getTeam =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const teamId =
+        parseInt(
+          req.params.id,
+          10
+        );
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      if (
+        Number.isNaN(teamId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          team: null,
+          message:
+            "Invalid team identifier",
+        });
+      }
+
+      console.log(
+        "======================================"
+      );
+
+      console.log(
+        `⚽ Loading team ${teamId} | Season ${season}`
+      );
+
+      /* ---------------------------------------------
+         TEAM PROFILE
+      --------------------------------------------- */
+
+      const teamData =
+        await loadTeam(
+          teamId
+        );
+
+      if (!teamData) {
+        return res.status(404).json({
+          success: false,
+          team: null,
+          message:
+            "Team not found",
+        });
+      }
+
+      /* ---------------------------------------------
+         SQUAD
+      --------------------------------------------- */
+
+      const players =
+        normalizePlayers(
+          teamData.squad,
+          teamData
+        );
+
+      /* ---------------------------------------------
+         MATCHES
+      --------------------------------------------- */
+
+      let matches = [];
+
+      try {
+        const response =
+          await loadTeamMatches(
+            teamId,
+            season,
+            {
+              limit: 100,
+            }
+          );
+
+        matches =
+          Array.isArray(
+            response?.matches
+          )
+            ? response.matches
+            : [];
+      } catch (error) {
+        console.warn(
+          "⚠️ Team matches unavailable:",
+          error.response?.data ||
+            error.message
+        );
+      }
+
+      const fixtures =
+        matches
+          .map(
+            normalizeFixture
+          )
+          .filter(Boolean);
+
+      const team =
+        normalizeTeam(
+          teamData,
+          season,
+          players,
+          fixtures
+        );
+
+      console.log(
+        `✅ Team loaded: ${team.name}`
+      );
+
+      console.log(
+        `👥 Squad: ${players.length}`
+      );
+
+      console.log(
+        `📅 Fixtures: ${fixtures.length}`
+      );
+
+      console.log(
+        "======================================"
+      );
+
+      return res.json({
+        success: true,
+        season,
+        team,
+        source:
+          "football-data.org",
+        message:
+          "Team loaded",
+      });
+    } catch (error) {
+      console.error(
+        "🔥 TeamController:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Team not found",
+        team: null,
+        message:
+          "Unable to load team",
       });
     }
-
-    const team = formatTeam({
-      team: teamInfo,
-      statistics,
-      players,
-      fixtures,
-      transfers,
-      coach,
-      injuries,
-      trophies,
-    });
-
-    return res.json({
-      success: true,
-      team,
-    });
-
-  } catch (err) {
-    console.error("TeamController:", err.message);
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to load team",
-    });
-  }
-};
+  };
 
 /* =====================================================
-   TEAM PLAYERS
+TEAM PLAYERS
 ===================================================== */
 
-exports.getPlayers = async (req, res) => {
-  try {
-    const teamId = req.params.id;
-    const season = Number(req.query.season) || 2023;
+exports.getPlayers =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const teamId =
+        parseInt(
+          req.params.id,
+          10
+        );
 
-    const players = await apiGet("/players", {
-      team: teamId,
-      season,
-    });
+      if (
+        Number.isNaN(teamId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          players: [],
+          message:
+            "Invalid team identifier",
+        });
+      }
 
-    return res.json({
-      success: true,
-      players,
-    });
+      const teamData =
+        await loadTeam(
+          teamId
+        );
 
-  } catch (err) {
-    console.error("Team Players:", err.message);
+      if (!teamData) {
+        return res.status(404).json({
+          success: false,
+          players: [],
+          message:
+            "Team not found",
+        });
+      }
 
-    return res.status(500).json({
-      success: false,
-      players: [],
-      message: "Unable to load team players",
-    });
-  }
-};
+      const players =
+        normalizePlayers(
+          teamData.squad,
+          teamData
+        );
+
+      return res.json({
+        success: true,
+        count:
+          players.length,
+        players,
+        source:
+          "football-data.org",
+        message:
+          "Team players loaded",
+      });
+    } catch (error) {
+      console.error(
+        "🔥 Team Players:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        players: [],
+        message:
+          "Unable to load team players",
+      });
+    }
+  };
 
 /* =====================================================
-   TEAM STATISTICS
+TEAM STATISTICS
+
+Calculated from football-data.org matches.
 ===================================================== */
 
-exports.getStatistics = async (req, res) => {
-  try {
-    const teamId = req.params.id;
-    const season = Number(req.query.season) || 2023;
-    const league = Number(req.query.league) || 39;
+exports.getStatistics =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const teamId =
+        parseInt(
+          req.params.id,
+          10
+        );
 
-    const stats = await apiGet("/teams/statistics", {
-      team: teamId,
-      league,
-      season,
-    });
+      const season =
+        resolveSeason(
+          req.query.season
+        );
 
-    const statistics = {
-      played:
-        stats.fixtures?.played?.total || 0,
+      if (
+        Number.isNaN(teamId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          statistics: null,
+          message:
+            "Invalid team identifier",
+        });
+      }
 
-      wins:
-        stats.fixtures?.wins?.total || 0,
+      const response =
+        await loadTeamMatches(
+          teamId,
+          season,
+          {
+            limit: 100,
+          }
+        );
 
-      draws:
-        stats.fixtures?.draws?.total || 0,
+      const matches =
+        Array.isArray(
+          response?.matches
+        )
+          ? response.matches
+          : [];
 
-      losses:
-        stats.fixtures?.loses?.total || 0,
+      const stats = {
+        played: 0,
 
-      goalsFor:
-        stats.goals?.for?.total?.total || 0,
+        wins: 0,
 
-      goalsAgainst:
-        stats.goals?.against?.total?.total || 0,
+        draws: 0,
 
-      cleanSheets:
-        stats.clean_sheet?.total || 0,
+        losses: 0,
 
-      failedToScore:
-        stats.failed_to_score?.total || 0,
+        goalsFor: 0,
 
-      points:
-        (stats.fixtures?.wins?.total || 0) * 3 +
-        (stats.fixtures?.draws?.total || 0),
+        goalsAgainst: 0,
 
-      form:
-        stats.form || "",
+        cleanSheets: 0,
 
-      biggestWin:
-        stats.biggest?.wins || null,
+        failedToScore: 0,
 
-      biggestLoss:
-        stats.biggest?.loses || null,
+        points: 0,
 
-      goals: stats.goals || {},
+        form: "",
 
-      cards: stats.cards || {},
+        biggestWin: null,
 
-      lineups: stats.lineups || [],
+        biggestLoss: null,
 
-      home: {
-        played:
-          stats.fixtures?.played?.home || 0,
+        goals: {
+          for: {
+            total: 0,
+          },
 
-        wins:
-          stats.fixtures?.wins?.home || 0,
+          against: {
+            total: 0,
+          },
+        },
 
-        draws:
-          stats.fixtures?.draws?.home || 0,
+        cards: {},
 
-        losses:
-          stats.fixtures?.loses?.home || 0,
-      },
+        lineups: [],
 
-      away: {
-        played:
-          stats.fixtures?.played?.away || 0,
+        home: {
+          played: 0,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+        },
 
-        wins:
-          stats.fixtures?.wins?.away || 0,
+        away: {
+          played: 0,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+        },
 
-        draws:
-          stats.fixtures?.draws?.away || 0,
+        season,
+      };
 
-        losses:
-          stats.fixtures?.loses?.away || 0,
-      },
-    };
+      const completed =
+        matches.filter(
+          (match) =>
+            match?.status ===
+              "FINISHED" ||
+            match?.status ===
+              "AWARDED"
+        );
 
-    return res.json({
-      success: true,
-      statistics,
-    });
+      const form = [];
 
-  } catch (err) {
-    console.error("Team Statistics:", err.message);
+      for (
+        const match
+        of completed
+      ) {
+        const isHome =
+          match.homeTeam?.id ===
+          teamId;
 
-    return res.status(500).json({
-      success: false,
-      statistics: null,
-      message: "Unable to load team statistics",
-    });
-  }
-};
+        const isAway =
+          match.awayTeam?.id ===
+          teamId;
+
+        if (
+          !isHome &&
+          !isAway
+        ) {
+          continue;
+        }
+
+        const homeGoals =
+          match.score?.fullTime
+            ?.home;
+
+        const awayGoals =
+          match.score?.fullTime
+            ?.away;
+
+        if (
+          homeGoals === null ||
+          homeGoals === undefined ||
+          awayGoals === null ||
+          awayGoals === undefined
+        ) {
+          continue;
+        }
+
+        stats.played++;
+
+        const scored =
+          isHome
+            ? num(homeGoals)
+            : num(awayGoals);
+
+        const conceded =
+          isHome
+            ? num(awayGoals)
+            : num(homeGoals);
+
+        stats.goalsFor +=
+          scored;
+
+        stats.goalsAgainst +=
+          conceded;
+
+        if (
+          conceded === 0
+        ) {
+          stats.cleanSheets++;
+        }
+
+        if (
+          scored === 0
+        ) {
+          stats.failedToScore++;
+        }
+
+        const goalDifference =
+          scored -
+          conceded;
+
+        if (
+          isHome
+        ) {
+          stats.home.played++;
+        } else {
+          stats.away.played++;
+        }
+
+        if (
+          goalDifference > 0
+        ) {
+          stats.wins++;
+
+          stats.points += 3;
+
+          form.push("W");
+
+          if (
+            isHome
+          ) {
+            stats.home.wins++;
+          } else {
+            stats.away.wins++;
+          }
+        } else if (
+          goalDifference === 0
+        ) {
+          stats.draws++;
+
+          stats.points += 1;
+
+          form.push("D");
+
+          if (
+            isHome
+          ) {
+            stats.home.draws++;
+          } else {
+            stats.away.draws++;
+          }
+        } else {
+          stats.losses++;
+
+          form.push("L");
+
+          if (
+            isHome
+          ) {
+            stats.home.losses++;
+          } else {
+            stats.away.losses++;
+          }
+        }
+
+        if (
+          !stats.biggestWin ||
+          goalDifference >
+            stats.biggestWin
+              .difference
+        ) {
+          if (
+            goalDifference > 0
+          ) {
+            stats.biggestWin = {
+              difference:
+                goalDifference,
+
+              score:
+                `${isHome ? homeGoals : awayGoals}-${isHome ? awayGoals : homeGoals}`,
+            };
+          }
+        }
+
+        if (
+          !stats.biggestLoss ||
+          Math.abs(
+            goalDifference
+          ) >
+            stats.biggestLoss
+              .difference
+        ) {
+          if (
+            goalDifference < 0
+          ) {
+            stats.biggestLoss = {
+              difference:
+                Math.abs(
+                  goalDifference
+                ),
+
+              score:
+                `${isHome ? homeGoals : awayGoals}-${isHome ? awayGoals : homeGoals}`,
+            };
+          }
+        }
+      }
+
+      stats.form =
+        form
+          .slice(-5)
+          .join("");
+
+      stats.goals.for.total =
+        stats.goalsFor;
+
+      stats.goals.against.total =
+        stats.goalsAgainst;
+
+      return res.json({
+        success: true,
+        season,
+        statistics: stats,
+        source:
+          "football-data.org",
+        message:
+          "Team statistics loaded",
+      });
+    } catch (error) {
+      console.error(
+        "🔥 Team Statistics:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        statistics: null,
+        message:
+          "Unable to load team statistics",
+      });
+    }
+  };
 
 /* =====================================================
-   TEAM FIXTURES
+TEAM FIXTURES
+
+Upcoming matches.
 ===================================================== */
 
-exports.getFixtures = async (req, res) => {
-  try {
-    const teamId = req.params.id;
-    const season = Number(req.query.season) || 2023;
+exports.getFixtures =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const teamId =
+        parseInt(
+          req.params.id,
+          10
+        );
 
-    const fixtures = await apiGet("/fixtures", {
-      team: teamId,
-      season,
-      next: 10,
-    });
+      const season =
+        resolveSeason(
+          req.query.season
+        );
 
+      if (
+        Number.isNaN(teamId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          fixtures: [],
+          message:
+            "Invalid team identifier",
+        });
+      }
+
+      const response =
+        await loadTeamMatches(
+          teamId,
+          season,
+          {
+            status:
+              "SCHEDULED",
+            limit: 20,
+          }
+        );
+
+      const fixtures =
+        Array.isArray(
+          response?.matches
+        )
+          ? response.matches
+              .map(
+                normalizeFixture
+              )
+              .filter(Boolean)
+          : [];
+
+      return res.json({
+        success: true,
+        season,
+        count:
+          fixtures.length,
+        fixtures,
+        source:
+          "football-data.org",
+        message:
+          "Team fixtures loaded",
+      });
+    } catch (error) {
+      console.error(
+        "🔥 Team Fixtures:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        fixtures: [],
+        message:
+          "Unable to load team fixtures",
+      });
+    }
+  };
+
+/* =====================================================
+TEAM HISTORY
+
+Recent completed matches.
+===================================================== */
+
+exports.getHistory =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const teamId =
+        parseInt(
+          req.params.id,
+          10
+        );
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      if (
+        Number.isNaN(teamId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          history: [],
+          message:
+            "Invalid team identifier",
+        });
+      }
+
+      const response =
+        await loadTeamMatches(
+          teamId,
+          season,
+          {
+            status:
+              "FINISHED",
+            limit: 20,
+          }
+        );
+
+      const history =
+        Array.isArray(
+          response?.matches
+        )
+          ? response.matches
+              .map(
+                normalizeFixture
+              )
+              .filter(Boolean)
+              .sort(
+                (a, b) =>
+                  new Date(
+                    b.utcDate
+                  ) -
+                  new Date(
+                    a.utcDate
+                  )
+              )
+          : [];
+
+      return res.json({
+        success: true,
+        season,
+        count:
+          history.length,
+        history,
+        source:
+          "football-data.org",
+        message:
+          "Team history loaded",
+      });
+    } catch (error) {
+      console.error(
+        "🔥 Team History:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        history: [],
+        message:
+          "Unable to load team history",
+      });
+    }
+  };
+
+/* =====================================================
+TEAM COACH
+
+Comes from the team resource.
+===================================================== */
+
+exports.getCoach =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const teamId =
+        parseInt(
+          req.params.id,
+          10
+        );
+
+      if (
+        Number.isNaN(teamId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          coach: null,
+          message:
+            "Invalid team identifier",
+        });
+      }
+
+      const team =
+        await loadTeam(
+          teamId
+        );
+
+      const coach =
+        team?.coach || null;
+
+      return res.json({
+        success: true,
+        coach,
+        source:
+          "football-data.org",
+        message:
+          coach
+            ? "Team coach loaded"
+            : "Coach information unavailable",
+      });
+    } catch (error) {
+      console.error(
+        "🔥 Team Coach:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        coach: null,
+        message:
+          "Unable to load team coach",
+      });
+    }
+  };
+
+/* =====================================================
+TEAM TRANSFERS
+
+football-data.org does not provide the equivalent
+API-Football transfer endpoint.
+===================================================== */
+
+exports.getTransfers =
+  async (
+    req,
+    res
+  ) => {
     return res.json({
       success: true,
-      count: fixtures.length,
-      fixtures,
-    });
-
-  } catch (err) {
-    console.error("Team Fixtures:", err.message);
-
-    return res.status(500).json({
-      success: false,
       count: 0,
-      fixtures: [],
-      message: "Unable to load fixtures",
-    });
-  }
-};
-
-/* =====================================================
-   TEAM HISTORY
-===================================================== */
-
-exports.getHistory = async (req, res) => {
-  try {
-    const teamId = req.params.id;
-
-    const history = await apiGet("/fixtures/headtohead", {
-      h2h: `${teamId}-${teamId}`,
-      last: 10,
-    });
-
-    return res.json({
-      success: true,
-      history,
-    });
-
-  } catch (err) {
-    console.error("Team History:", err.message);
-
-    return res.status(500).json({
-      success: false,
-      history: [],
-      message: "Unable to load history",
-    });
-  }
-};
-
-/* =====================================================
-   TEAM COACH
-===================================================== */
-
-exports.getCoach = async (req, res) => {
-  try {
-    const coach = await apiGet("/coachs", {
-      team: req.params.id,
-    });
-
-    return res.json({
-      success: true,
-      coach: coach[0] || null,
-    });
-
-  } catch (err) {
-    console.error("Team Coach:", err.message);
-
-    return res.status(500).json({
-      success: false,
-      coach: null,
-      message: "Unable to load coach",
-    });
-  }
-};
-
-/* =====================================================
-   TEAM TRANSFERS
-===================================================== */
-
-exports.getTransfers = async (req, res) => {
-  try {
-    const transfers = await apiGet("/transfers", {
-      team: req.params.id,
-    });
-
-    return res.json({
-      success: true,
-      transfers,
-    });
-
-  } catch (err) {
-    console.error("Team Transfers:", err.message);
-
-    return res.status(500).json({
-      success: false,
       transfers: [],
-      message: "Unable to load transfers",
+      available: false,
+      source:
+        "football-data.org",
+      message:
+        "Team transfers are not available from football-data.org",
     });
-  }
-};
+  };
 
 /* =====================================================
-   TEAM INJURIES
+TEAM INJURIES
+
+football-data.org does not provide the equivalent
+API-Football injuries endpoint.
 ===================================================== */
 
-exports.getInjuries = async (req, res) => {
-  try {
-    const injuries = await apiGet("/injuries", {
-      team: req.params.id,
-      league: Number(req.query.league) || 39,
-      season: Number(req.query.season) || 2023,
-    });
-
+exports.getInjuries =
+  async (
+    req,
+    res
+  ) => {
     return res.json({
       success: true,
-      injuries,
-    });
-
-  } catch (err) {
-    console.error("Team Injuries:", err.message);
-
-    return res.status(500).json({
-      success: false,
+      count: 0,
       injuries: [],
-      message: "Unable to load injuries",
+      available: false,
+      source:
+        "football-data.org",
+      message:
+        "Team injury data is not available from football-data.org",
     });
-  }
-};
+  };
 
 /* =====================================================
-   TEAM TROPHIES
+TEAM TROPHIES
+
+football-data.org does not provide the equivalent
+API-Football trophies endpoint.
 ===================================================== */
 
-exports.getTrophies = async (req, res) => {
-  try {
-    const trophies = await apiGet("/trophies", {
-      team: req.params.id,
-    });
-
+exports.getTrophies =
+  async (
+    req,
+    res
+  ) => {
     return res.json({
       success: true,
-      trophies,
-    });
-
-  } catch (err) {
-    console.error("Team Trophies:", err.message);
-
-    return res.status(500).json({
-      success: false,
+      count: 0,
       trophies: [],
-      message: "Unable to load trophies",
+      available: false,
+      source:
+        "football-data.org",
+      message:
+        "Team trophy data is not available from football-data.org",
     });
-  }
-};
+  };

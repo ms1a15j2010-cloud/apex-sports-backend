@@ -1,11 +1,25 @@
 const express = require("express");
 
-const router = express.Router();
+const router =
+  express.Router();
 
 const {
   getFeaturedMatch,
-} = require("../controllers/featuredMatchController");
+} = require(
+  "../controllers/featuredMatchController"
+);
 
-router.get("/", getFeaturedMatch);
+/* =====================================================
+FEATURED MATCH
+
+GET:
+
+/api/featured-match
+===================================================== */
+
+router.get(
+  "/",
+  getFeaturedMatch
+);
 
 module.exports = router;

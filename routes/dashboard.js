@@ -46,7 +46,7 @@ const {
    DASHBOARD
 ===================================================== */
 
-router.get("/", getDashboardHero);
+router.get("/hero", getDashboardHero);
 
 /* =====================================================
    FEATURED

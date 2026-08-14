@@ -1,224 +1,1097 @@
-function formatPlayer(data) {
-  if (!data) return null;
+const {
+  footballDataGet,
+} = require("../services/footballDataApi");
 
-  const player = data.player?.player || {};
-  const statistics = data.player?.statistics || [];
+const formatPlayer = require("../formatters/playerFormatter");
 
+/* =====================================================
+CONFIG
+===================================================== */
+
+const LEAGUE_CONFIG = {
+  epl: {
+    code: "PL",
+    name: "Premier League",
+  },
+};
+
+/* =====================================================
+SEASON RESOLVER
+
+football-data.org uses the starting year.
+
+2024 = 2024/25
+2025 = 2025/26
+2026 = 2026/27
+===================================================== */
+
+function resolveSeason(requestedSeason) {
+  const season = parseInt(
+    requestedSeason,
+    10
+  );
+
+  if (
+    !Number.isNaN(season) &&
+    season >= 2000 &&
+    season <= 2100
+  ) {
+    return season;
+  }
+
+  return 2025;
+}
+
+/* =====================================================
+SEASON DATE RANGE
+
+Used for /persons/:id/matches because the player
+matches endpoint is date-based rather than using
+the same season parameter as competition endpoints.
+===================================================== */
+
+function getSeasonDates(season) {
+  return {
+    dateFrom: `${season}-07-01`,
+    dateTo: `${season + 1}-06-30`,
+  };
+}
+
+/* =====================================================
+NORMALIZE PLAYER
+
+football-data.org:
+
+firstName
+lastName
+dateOfBirth
+nationality
+position
+currentTeam
+
+Our formatter expects:
+
+firstname
+lastname
+birth
+team-like data inside statistics
+===================================================== */
+
+function normalizePlayer(profile) {
+  if (!profile) {
     return {
-    id: player.id,
+      id: null,
+      name: "Unknown Player",
+      firstname: null,
+      lastname: null,
+      age: null,
+      nationality: null,
+      height: null,
+      weight: null,
+      injured: false,
+      photo: null,
 
-    name: player.name,
+      birth: {
+        date: null,
+        place: null,
+        country: null,
+      },
+    };
+  }
 
-    firstname: player.firstname,
+  return {
+    id:
+      profile.id ?? null,
 
-    lastname: player.lastname,
+    name:
+      profile.name ||
+      "Unknown Player",
 
-    age: player.age,
+    firstname:
+      profile.firstName ||
+      null,
 
-    nationality: player.nationality,
+    lastname:
+      profile.lastName ||
+      null,
 
-    height: player.height,
+    age: null,
 
-    weight: player.weight,
+    nationality:
+      profile.nationality ||
+      null,
 
-    injured: player.injured,
+    height: null,
 
-    photo: player.photo,
+    weight: null,
+
+    injured: false,
+
+    photo: null,
 
     birth: {
-      date: player.birth?.date,
-      place: player.birth?.place,
-      country: player.birth?.country,
+      date:
+        profile.dateOfBirth ||
+        null,
+
+      place:
+        profile.placeOfBirth ||
+        null,
+
+      country:
+        profile.countryOfBirth ||
+        null,
     },
 
-    /* =========================
-       CAREER / PERFORMANCE
-    ========================= */
+    currentTeam:
+      profile.currentTeam ||
+      null,
+  };
+}
 
-    statistics: statistics.map((stat) => ({
-      league: {
-        id: stat.league?.id,
-        name: stat.league?.name,
-        country: stat.league?.country,
-        logo: stat.league?.logo,
-        season: stat.league?.season,
-      },
+/* =====================================================
+BUILD STATISTICS
+
+football-data.org /persons/:id/matches returns
+aggregated values such as:
+
+matchesOnPitch
+startingXI
+minutesPlayed
+goals
+assists
+cards
+etc.
+
+We convert those values into the shape your existing
+playerFormatter expects.
+===================================================== */
+
+function buildPlayerStatistics(
+  profile,
+  matchData,
+  season,
+  competitionCode = "PL"
+) {
+  const aggregation =
+    matchData?.aggregations || {};
+
+  const team =
+    profile?.currentTeam || {};
+
+  const competition =
+    {
+      id: 2021,
+
+      name:
+        "Premier League",
+
+      country:
+        "England",
+
+      logo:
+        "https://crests.football-data.org/PL.png",
+
+      season,
+    };
+
+  return [
+    {
+      league: competition,
 
       team: {
-        id: stat.team?.id,
-        name: stat.team?.name,
-        logo: stat.team?.logo,
+        id:
+          team.id ?? null,
+
+        name:
+          team.name ||
+          team.shortName ||
+          "Unknown Team",
+
+        logo:
+          team.crest ||
+          null,
       },
 
       games: {
         appearances:
-          stat.games?.appearences ?? 0,
+          aggregation.matchesOnPitch ??
+          0,
 
         lineups:
-          stat.games?.lineups ?? 0,
+          aggregation.startingXI ??
+          0,
 
         minutes:
-          stat.games?.minutes ?? 0,
+          aggregation.minutesPlayed ??
+          0,
 
         number:
-          stat.games?.number ?? null,
+          profile?.shirtNumber ??
+          null,
 
         position:
-          stat.games?.position ?? "",
+          profile?.position ||
+          "",
 
         rating:
-          stat.games?.rating ?? "",
+          "",
       },
 
       substitutes: {
-        in:
-          stat.substitutes?.in ?? 0,
-
-        out:
-          stat.substitutes?.out ?? 0,
-
-        bench:
-          stat.substitutes?.bench ?? 0,
+        in: 0,
+        out: 0,
+        bench: 0,
       },
 
       shots: {
         total:
-          stat.shots?.total ?? 0,
+          aggregation.shots ??
+          0,
 
         on:
-          stat.shots?.on ?? 0,
+          aggregation.shotsOnTarget ??
+          0,
       },
 
       goals: {
         total:
-          stat.goals?.total ?? 0,
+          aggregation.goals ??
+          0,
 
         conceded:
-          stat.goals?.conceded ?? 0,
+          aggregation.concededGoals ??
+          0,
 
         assists:
-          stat.goals?.assists ?? 0,
+          aggregation.assists ??
+          0,
 
         saves:
-          stat.goals?.saves ?? 0,
+          aggregation.saves ??
+          0,
       },
 
       passes: {
         total:
-          stat.passes?.total ?? 0,
+          aggregation.passes ??
+          0,
 
         key:
-          stat.passes?.key ?? 0,
+          aggregation.keyPasses ??
+          0,
 
         accuracy:
-          stat.passes?.accuracy ?? "",
+          aggregation.passAccuracy ??
+          "",
       },
 
       tackles: {
         total:
-          stat.tackles?.total ?? 0,
+          aggregation.tackles ??
+          0,
 
         blocks:
-          stat.tackles?.blocks ?? 0,
+          aggregation.blocks ??
+          0,
 
         interceptions:
-          stat.tackles?.interceptions ?? 0,
+          aggregation.interceptions ??
+          0,
       },
 
       duels: {
         total:
-          stat.duels?.total ?? 0,
+          aggregation.duels ??
+          0,
 
         won:
-          stat.duels?.won ?? 0,
+          aggregation.duelsWon ??
+          0,
       },
 
       dribbles: {
         attempts:
-          stat.dribbles?.attempts ?? 0,
+          aggregation.dribbles ??
+          0,
 
         success:
-          stat.dribbles?.success ?? 0,
+          aggregation.dribblesWon ??
+          0,
 
         past:
-          stat.dribbles?.past ?? 0,
+          aggregation.dribblesPast ??
+          0,
       },
 
       fouls: {
         drawn:
-          stat.fouls?.drawn ?? 0,
+          aggregation.foulsDrawn ??
+          0,
 
         committed:
-          stat.fouls?.committed ?? 0,
+          aggregation.foulsCommitted ??
+          0,
       },
 
       cards: {
         yellow:
-          stat.cards?.yellow ?? 0,
+          aggregation.yellowCards ??
+          0,
 
         yellowred:
-          stat.cards?.yellowred ?? 0,
+          aggregation.yellowRedCards ??
+          0,
 
         red:
-          stat.cards?.red ?? 0,
+          aggregation.redCards ??
+          0,
       },
 
       penalty: {
         won:
-          stat.penalty?.won ?? 0,
+          aggregation.penaltiesWon ??
+          0,
 
         committed:
-          stat.penalty?.committed ??
-          stat.penalty?.commited ??
+          aggregation.penaltiesCommitted ??
           0,
 
         scored:
-          stat.penalty?.scored ?? 0,
+          aggregation.penalties ??
+          0,
 
         missed:
-          stat.penalty?.missed ?? 0,
+          aggregation.penaltiesMissed ??
+          0,
 
         saved:
-          stat.penalty?.saved ?? 0,
+          aggregation.penaltiesSaved ??
+          0,
       },
-    })),
+    },
+  ];
+}
 
-    /* =========================
-       CAREER
-    ========================= */
+/* =====================================================
+BUILD FORMATTER INPUT
 
-    career: statistics,
+This creates the API-Football-like intermediate
+structure required by playerFormatter.js.
+===================================================== */
 
-    performance: statistics,
+function buildFormatterInput(
+  profile,
+  matchData,
+  season,
+  transfers = [],
+  trophies = []
+) {
+  const normalizedPlayer =
+    normalizePlayer(profile);
 
-    /* =========================
-       HISTORY / FIXTURES
-    ========================= */
+  const statistics =
+    buildPlayerStatistics(
+      profile,
+      matchData,
+      season
+    );
 
-    history: [],
+  return {
+    player: {
+      player:
+        normalizedPlayer,
 
-    fixtures: [],
+      statistics,
+    },
 
-    /* =========================
-       TRANSFERS
-    ========================= */
+    transfers,
 
-    transfers: Array.isArray(
-      data.transfers
-    )
-      ? data.transfers
-      : [],
-
-    /* =========================
-       TROPHIES
-    ========================= */
-
-    trophies: Array.isArray(
-      data.trophies
-    )
-      ? data.trophies
-      : [],
+    trophies,
   };
 }
 
-module.exports = formatPlayer;
+/* =====================================================
+GET PERSON MATCHES
+
+Used for:
+
+statistics
+career
+performance
+fixtures
+history
+===================================================== */
+
+async function getPersonMatches(
+  playerId,
+  season
+) {
+  const {
+    dateFrom,
+    dateTo,
+  } =
+    getSeasonDates(
+      season
+    );
+
+  console.log(
+    `🌍 Football-data.org player matches: /persons/${playerId}/matches`
+  );
+
+  console.log(
+    "Football-data.org player match params:",
+    {
+      dateFrom,
+      dateTo,
+      competitions: "PL",
+      limit: 100,
+    }
+  );
+
+  return await footballDataGet(
+    `/persons/${playerId}/matches`,
+    {
+      dateFrom,
+      dateTo,
+      competitions: "PL",
+      limit: 100,
+    }
+  );
+}
+
+/* =====================================================
+PLAYER PROFILE
+
+GET:
+
+/api/player/:id
+
+SOURCE:
+
+football-data.org /persons/:id
+
+Transfers and trophies are not supplied by
+football-data.org, so they remain empty arrays.
+===================================================== */
+
+exports.getPlayer = async (
+  req,
+  res
+) => {
+  try {
+    const playerId =
+      req.params.id;
+
+    const season =
+      resolveSeason(
+        req.query.season
+      );
+
+    console.log(
+      `⚽ Loading player ${playerId} from football-data.org | Season ${season}`
+    );
+
+    /* -------------------------------------------------
+    PLAYER PROFILE
+    ------------------------------------------------- */
+
+    const profile =
+      await footballDataGet(
+        `/persons/${playerId}`
+      );
+
+    if (!profile) {
+      return res.json({
+        success: false,
+        player: null,
+        message:
+          "Player not found",
+      });
+    }
+
+    /* -------------------------------------------------
+    PLAYER MATCHES / AGGREGATIONS
+    ------------------------------------------------- */
+
+    let matchData = {};
+
+    try {
+      matchData =
+        await getPersonMatches(
+          playerId,
+          season
+        );
+    } catch (error) {
+      console.error(
+        "Player matches:",
+        error.response?.data ||
+          error.message
+      );
+    }
+
+    /* -------------------------------------------------
+    FORMAT
+    ------------------------------------------------- */
+
+    const player =
+      formatPlayer(
+        buildFormatterInput(
+          profile,
+          matchData,
+          season,
+          [],
+          []
+        )
+      );
+
+    return res.json({
+      success: true,
+
+      season,
+
+      player,
+
+      message:
+        "Player loaded",
+    });
+  } catch (error) {
+    console.error(
+      "❌ PlayerController:",
+      error.response?.data ||
+        error.message
+    );
+
+    return res.status(
+      error.response?.status >= 400 &&
+      error.response?.status < 600
+        ? error.response.status
+        : 500
+    ).json({
+      success: false,
+
+      player: null,
+
+      message:
+        "Unable to load player",
+
+      error:
+        error.response?.data ||
+        error.message,
+    });
+  }
+};
+
+/* =====================================================
+PLAYER STATISTICS
+
+GET:
+
+/api/player/:id/statistics
+===================================================== */
+
+exports.getStatistics =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const playerId =
+        req.params.id;
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      console.log(
+        `📊 Loading player statistics | Player ${playerId} | Season ${season}`
+      );
+
+      const profile =
+        await footballDataGet(
+          `/persons/${playerId}`
+        );
+
+      if (!profile) {
+        return res.json({
+          success: false,
+          season,
+          statistics: [],
+          message:
+            "Player not found",
+        });
+      }
+
+      const matchData =
+        await getPersonMatches(
+          playerId,
+          season
+        );
+
+      const formatterInput =
+        buildFormatterInput(
+          profile,
+          matchData,
+          season
+        );
+
+      const formatted =
+        formatPlayer(
+          formatterInput
+        );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        statistics:
+          formatted?.statistics ||
+          [],
+
+        message:
+          "Player statistics loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ PlayerStatistics:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(
+        error.response?.status >= 400 &&
+        error.response?.status < 600
+          ? error.response.status
+          : 500
+      ).json({
+        success: false,
+
+        statistics: [],
+
+        message:
+          "Unable to load player statistics",
+      });
+    }
+  };
+
+/* =====================================================
+PLAYER TRANSFERS
+
+football-data.org does not provide an equivalent
+to API-Football /transfers.
+
+Return an explicit empty response instead of
+calling the old API-Football endpoint.
+===================================================== */
+
+exports.getTransfers =
+  async (
+    req,
+    res
+  ) => {
+    return res.json({
+      success: true,
+
+      count: 0,
+
+      transfers: [],
+
+      source:
+        "football-data.org",
+
+      available: false,
+
+      message:
+        "Player transfer history is not provided by football-data.org",
+    });
+  };
+
+/* =====================================================
+PLAYER TROPHIES
+
+football-data.org does not provide an equivalent
+to API-Football /trophies.
+===================================================== */
+
+exports.getTrophies =
+  async (
+    req,
+    res
+  ) => {
+    return res.json({
+      success: true,
+
+      count: 0,
+
+      trophies: [],
+
+      source:
+        "football-data.org",
+
+      available: false,
+
+      message:
+        "Player trophy history is not provided by football-data.org",
+    });
+  };
+
+/* =====================================================
+PLAYER SEARCH
+
+football-data.org does not expose a direct player-name
+search endpoint.
+
+We intentionally do not call the old API-Football
+/players endpoint.
+===================================================== */
+
+exports.searchPlayers =
+  async (
+    req,
+    res
+  ) => {
+    return res.json({
+      success: true,
+
+      count: 0,
+
+      players: [],
+
+      source:
+        "football-data.org",
+
+      available: false,
+
+      message:
+        "Player name search is not directly provided by football-data.org",
+    });
+  };
+
+/* =====================================================
+PLAYER CAREER
+
+football-data.org player matches cover the player's
+available matches. We expose those matches-derived
+statistics as the career data available through this API.
+===================================================== */
+
+exports.getCareer =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const playerId =
+        req.params.id;
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      const profile =
+        await footballDataGet(
+          `/persons/${playerId}`
+        );
+
+      if (!profile) {
+        return res.json({
+          success: false,
+
+          season,
+
+          career: [],
+
+          message:
+            "Player not found",
+        });
+      }
+
+      const matchData =
+        await getPersonMatches(
+          playerId,
+          season
+        );
+
+      const formatted =
+        formatPlayer(
+          buildFormatterInput(
+            profile,
+            matchData,
+            season
+          )
+        );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        career:
+          formatted?.career ||
+          [],
+
+        message:
+          "Career loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ PlayerCareer:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(
+        error.response?.status >= 400 &&
+        error.response?.status < 600
+          ? error.response.status
+          : 500
+      ).json({
+        success: false,
+
+        career: [],
+
+        message:
+          "Unable to load career",
+      });
+    }
+  };
+
+/* =====================================================
+PLAYER PERFORMANCE
+
+Returns the available aggregated performance
+data plus the player's matches.
+===================================================== */
+
+exports.getPerformance =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const playerId =
+        req.params.id;
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      const profile =
+        await footballDataGet(
+          `/persons/${playerId}`
+        );
+
+      if (!profile) {
+        return res.json({
+          success: false,
+
+          season,
+
+          performance: [],
+
+          message:
+            "Player not found",
+        });
+      }
+
+      const matchData =
+        await getPersonMatches(
+          playerId,
+          season
+        );
+
+      const formatted =
+        formatPlayer(
+          buildFormatterInput(
+            profile,
+            matchData,
+            season
+          )
+        );
+
+      return res.json({
+        success: true,
+
+        season,
+
+        performance:
+          formatted?.performance ||
+          [],
+
+        matches:
+          Array.isArray(
+            matchData?.matches
+          )
+            ? matchData.matches
+            : [],
+      });
+    } catch (error) {
+      console.error(
+        "❌ PlayerPerformance:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(
+        error.response?.status >= 400 &&
+        error.response?.status < 600
+          ? error.response.status
+          : 500
+      ).json({
+        success: false,
+
+        performance: [],
+
+        matches: [],
+
+        message:
+          "Unable to load player performance",
+      });
+    }
+  };
+
+/* =====================================================
+PLAYER FIXTURES
+
+football-data.org:
+
+/persons/:id/matches
+
+We return the player's matches.
+===================================================== */
+
+exports.getFixtures =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const playerId =
+        req.params.id;
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      const matchData =
+        await getPersonMatches(
+          playerId,
+          season
+        );
+
+      const fixtures =
+        Array.isArray(
+          matchData?.matches
+        )
+          ? matchData.matches
+          : [];
+
+      return res.json({
+        success: true,
+
+        season,
+
+        count:
+          fixtures.length,
+
+        fixtures,
+
+        message:
+          "Player fixtures loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ PlayerFixtures:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(
+        error.response?.status >= 400 &&
+        error.response?.status < 600
+          ? error.response.status
+          : 500
+      ).json({
+        success: false,
+
+        fixtures: [],
+
+        message:
+          "Unable to load player fixtures",
+      });
+    }
+  };
+
+/* =====================================================
+PLAYER HISTORY
+
+Use the player's football-data.org match history.
+===================================================== */
+
+exports.getHistory =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const playerId =
+        req.params.id;
+
+      const season =
+        resolveSeason(
+          req.query.season
+        );
+
+      const matchData =
+        await getPersonMatches(
+          playerId,
+          season
+        );
+
+      const history =
+        Array.isArray(
+          matchData?.matches
+        )
+          ? matchData.matches
+          : [];
+
+      return res.json({
+        success: true,
+
+        season,
+
+        count:
+          history.length,
+
+        history,
+
+        message:
+          "Player history loaded",
+      });
+    } catch (error) {
+      console.error(
+        "❌ PlayerHistory:",
+        error.response?.data ||
+          error.message
+      );
+
+      return res.status(
+        error.response?.status >= 400 &&
+        error.response?.status < 600
+          ? error.response.status
+          : 500
+      ).json({
+        success: false,
+
+        history: [],
+
+        message:
+          "Unable to load player history",
+      });
+    }
+  };
