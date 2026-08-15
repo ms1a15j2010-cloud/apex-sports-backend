@@ -2,9 +2,10 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
+
 const featuredMatchRoutes =
   require("./routes/featuredMatch");
+
 const {
   getFinishedMatches,
 } = require("./services/footballDataApi");
@@ -16,7 +17,7 @@ CONFIG
 ===================================================== */
 
 const PORT =
-  process.env.PORT || 5000;
+  Number(process.env.PORT) || 5000;
 
 /* =====================================================
 CORS
@@ -73,12 +74,11 @@ app.use(
             `⏰ Global request timeout: ${req.method} ${req.originalUrl}`
           );
 
-          res
+          return res
             .status(504)
             .json({
               success: false,
-              message:
-                "Request timeout",
+              message: "Request timeout",
             });
         }
       }
@@ -89,36 +89,7 @@ app.use(
 );
 
 /* =====================================================
-ENVIRONMENT CHECK
-===================================================== */
-
-if (
-  !process.env.API_FOOTBALL_KEY
-) {
-  console.warn(
-    "⚠️ API_FOOTBALL_KEY is missing from .env"
-  );
-} else {
-  console.log(
-    "✓ API_FOOTBALL_KEY loaded"
-  );
-}
-
-if (
-  !process.env.API_HOST
-) {
-  console.warn(
-    "⚠️ API_HOST is missing from .env"
-  );
-} else {
-  console.log(
-    "✓ API_HOST:",
-    process.env.API_HOST
-  );
-}
-
-/* =====================================================
-FOOTBALL-DATA.ORG CHECK
+FOOTBALL-DATA.ORG ENVIRONMENT CHECK
 ===================================================== */
 
 if (
@@ -188,10 +159,8 @@ app.use(
 
 /* =====================================================
 LEAGUE ROUTES
-===================================================== */
 
-/*
-These routes remain available:
+Available examples:
 
 /api/league/epl
 /api/league/epl/fixtures
@@ -201,10 +170,7 @@ These routes remain available:
 /api/league/epl/topassists
 /api/league/epl/teams
 /api/league/epl/statistics
-
-The standings controller used here MUST use
-football-data.org.
-*/
+===================================================== */
 
 app.use(
   "/api/league",
@@ -215,27 +181,13 @@ app.use(
 STANDINGS ROUTES
 ===================================================== */
 
-/*
-IMPORTANT:
-
-/api/standings/epl
-
-uses:
-
-football-data.org
-
-NOT:
-
-footballApi.js
-*/
-
 app.use(
   "/api/standings",
   require("./routes/standings")
 );
 
 /* =====================================================
-LEGACY / OTHER ROUTES
+OTHER ROUTES
 ===================================================== */
 
 app.use(
@@ -279,13 +231,9 @@ app.use(
 );
 
 /* =====================================================
-DIRECT RESULTS FALLBACK
+DIRECT RESULTS ENDPOINT
 
-LEGACY API-FOOTBALL
-
-This is intentionally kept because the standings
-migration does NOT require removing API-Football
-from unrelated routes.
+football-data.org
 ===================================================== */
 
 app.get(
@@ -297,14 +245,10 @@ app.get(
       );
 
       const seasonParam =
-        Number(
-          req.query.season
-        );
+        Number(req.query.season);
 
       const season =
-        Number.isInteger(
-          seasonParam
-        ) &&
+        Number.isInteger(seasonParam) &&
         seasonParam >= 1900 &&
         seasonParam <= 2100
           ? seasonParam
@@ -313,229 +257,40 @@ app.get(
       const matches =
         await getFinishedMatches({
           season,
-
           limit: 50,
         });
 
       return res.json({
         success: true,
-
         season,
-
-        count:
-          matches.length,
-
+        count: matches.length,
         matches,
-
-        source:
-          "football-data.org",
-
-        message:
-          "Latest results loaded",
+        source: "football-data.org",
+        message: "Latest results loaded",
       });
     } catch (error) {
       console.error(
         "❌ Error fetching results from football-data.org:",
-        error.response?.data ||
-          error.message
+        error?.response?.data ||
+          error?.message ||
+          error
       );
 
       return res
         .status(500)
         .json({
           success: false,
-
           season:
-            req.query.season ||
-            null,
-
+            req.query.season || null,
           count: 0,
-
           matches: [],
-
-          source:
-            "football-data.org",
-
+          source: "football-data.org",
           message:
             "Unable to load latest results",
-
           error:
-            error.response?.data ||
-            error.message,
-        });
-    }
-  }
-);
-/* =====================================================
-TEMPORARY FOOTBALL-DATA.ORG CONNECTION TEST
-===================================================== */
-
-app.get(
-  "/api/test-football-data",
-  async (req, res) => {
-    try {
-      console.log(
-        "🌍 Testing football-data.org connection..."
-      );
-
-      if (
-        !process.env
-          .FOOTBALL_DATA_API_TOKEN
-      ) {
-        return res
-          .status(500)
-          .json({
-            success: false,
-            message:
-              "FOOTBALL_DATA_API_TOKEN is missing",
-          });
-      }
-
-      const response =
-        await axios.get(
-          "https://api.football-data.org/v4/competitions/PL",
-          {
-            headers: {
-              "X-Auth-Token":
-                process.env
-                  .FOOTBALL_DATA_API_TOKEN,
-            },
-
-            timeout: 30000,
-          }
-        );
-
-      const data =
-        response.data || {};
-
-      console.log(
-        "✅ football-data.org connection successful"
-      );
-
-      return res.json({
-        success: true,
-
-        message:
-          "Football-data.org connection successful",
-
-        competition:
-          data.competition?.name ||
-          data.name ||
-          null,
-
-        code:
-          data.competition?.code ||
-          data.code ||
-          "PL",
-
-        data,
-      });
-    } catch (error) {
-      console.error(
-        "❌ football-data.org test failed:",
-        error.response?.data ||
-          error.message
-      );
-
-      return res
-        .status(
-          error.response?.status ||
-            500
-        )
-        .json({
-          success: false,
-
-          message:
-            "Football-data.org connection failed",
-
-          error:
-            error.response?.data ||
-            error.message,
-        });
-    }
-  }
-);
-
-/* =====================================================
-TEMPORARY FOOTBALL-DATA.ORG FIXTURES TEST
-===================================================== */
-
-app.get(
-  "/api/test-football-data/fixtures",
-  async (req, res) => {
-    try {
-      console.log(
-        "⚽ Testing football-data.org fixtures..."
-      );
-
-      if (
-        !process.env
-          .FOOTBALL_DATA_API_TOKEN
-      ) {
-        return res
-          .status(500)
-          .json({
-            success: false,
-
-            message:
-              "FOOTBALL_DATA_API_TOKEN is missing",
-          });
-      }
-
-      const response =
-        await axios.get(
-          "https://api.football-data.org/v4/competitions/PL/matches",
-          {
-            headers: {
-              "X-Auth-Token":
-                process.env
-                  .FOOTBALL_DATA_API_TOKEN,
-            },
-
-            timeout: 30000,
-          }
-        );
-
-      const matches =
-        response.data?.matches ||
-        [];
-
-      console.log(
-        `✅ Fixtures received: ${matches.length}`
-      );
-
-      return res.json({
-        success: true,
-
-        competition:
-          "Premier League",
-
-        count:
-          matches.length,
-
-        matches,
-      });
-    } catch (error) {
-      console.error(
-        "❌ Fixtures test failed:",
-        error.response?.data ||
-          error.message
-      );
-
-      return res
-        .status(
-          error.response?.status ||
-            500
-        )
-        .json({
-          success: false,
-
-          message:
-            "Football-data.org fixtures request failed",
-
-          error:
-            error.response?.data ||
-            error.message,
+            error?.response?.data ||
+            error?.message ||
+            "Unknown error",
         });
     }
   }
@@ -550,14 +305,9 @@ app.get(
   (req, res) => {
     return res.json({
       success: true,
-
       status: "OK",
-
-      service:
-        "Apex Sports Backend",
-
-      timestamp:
-        new Date().toISOString(),
+      service: "Apex Sports Backend",
+      timestamp: new Date().toISOString(),
     });
   }
 );
@@ -571,12 +321,9 @@ app.get(
   (req, res) => {
     return res.json({
       success: true,
-
       message:
         "⚽ Apex Sports Backend Running",
-
-      version:
-        "2.0.0",
+      version: "2.0.0",
     });
   }
 );
@@ -595,7 +342,6 @@ app.use(
       .status(404)
       .json({
         success: false,
-
         message:
           `Route ${req.method} ${req.originalUrl} not found`,
       });
@@ -613,9 +359,7 @@ app.use(
       err
     );
 
-    if (
-      res.headersSent
-    ) {
+    if (res.headersSent) {
       return next(err);
     }
 
@@ -623,7 +367,6 @@ app.use(
       .status(500)
       .json({
         success: false,
-
         message:
           "Internal Server Error",
       });
@@ -639,31 +382,24 @@ app.listen(
   "0.0.0.0",
   () => {
     console.log("");
-
     console.log(
       "======================================"
     );
-
     console.log(
       "⚽ APEX SPORTS BACKEND"
     );
-
     console.log(
       "======================================"
     );
-
     console.log(
       `🚀 Local: http://localhost:${PORT}`
     );
-
     console.log(
       `🚀 API: http://localhost:${PORT}/api`
     );
-
     console.log(
       "======================================"
     );
-
     console.log("");
   }
 );
