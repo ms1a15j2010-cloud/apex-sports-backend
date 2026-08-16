@@ -202,7 +202,7 @@ app.use(
 
 app.use(
   "/api/headtohead",
-  require("./routes/headtohead")
+  require("./routes/headToHead")
 );
 
 app.use(
@@ -374,32 +374,58 @@ app.use(
 );
 
 /* =====================================================
-START SERVER
+START SERVER / VERCEL HANDLER
 ===================================================== */
 
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log("");
-    console.log(
-      "======================================"
-    );
-    console.log(
-      "⚽ APEX SPORTS BACKEND"
-    );
-    console.log(
-      "======================================"
-    );
-    console.log(
-      `🚀 Local: http://localhost:${PORT}`
-    );
-    console.log(
-      `🚀 API: http://localhost:${PORT}/api`
-    );
-    console.log(
-      "======================================"
-    );
-    console.log("");
-  }
-);
+/*
+LOCAL DEVELOPMENT
+-----------------
+When running locally:
+
+npm start
+
+Express listens on:
+
+http://localhost:5000
+
+VERCEL
+------
+When deployed on Vercel, Vercel imports
+the Express application instead of using
+app.listen().
+*/
+
+if (!process.env.VERCEL) {
+  app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+      console.log("");
+      console.log(
+        "======================================"
+      );
+      console.log(
+        "⚽ APEX SPORTS BACKEND"
+      );
+      console.log(
+        "======================================"
+      );
+      console.log(
+        `🚀 Local: http://localhost:${PORT}`
+      );
+      console.log(
+        `🚀 API: http://localhost:${PORT}/api`
+      );
+      console.log(
+        "======================================"
+      );
+      console.log("");
+    }
+  );
+}
+
+/* =====================================================
+EXPORT EXPRESS APP
+===================================================== */
+
+module.exports = app;
