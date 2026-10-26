@@ -106,7 +106,9 @@ function resolveSeason(
     }
   }
 
-  return 2025;
+  return new Date().getMonth() >= 6
+    ? new Date().getFullYear()
+    : new Date().getFullYear() - 1;
 }
 
 /* =====================================================
