@@ -1314,11 +1314,115 @@ async function searchFootball(
   );
 
   /* =================================================
-  RESULT
+  MATCH SEARCH
 
-  Match search intentionally remains empty to avoid
-  wasting provider quota.
+  Reuse the cached Premier League season feed so match
+  search does not request a separate provider resource
+  for every search term.
   ================================================= */
+
+  let matches = [];
+
+  try {
+    const season =
+      new Date().getMonth() >= 6
+        ? new Date().getFullYear()
+        : new Date().getFullYear() - 1;
+
+    const matchData =
+      await getPremierLeagueMatches({ season });
+
+    const seasonMatches = Array.isArray(matchData)
+      ? matchData
+      : Array.isArray(matchData?.matches)
+        ? matchData.matches
+        : [];
+
+    matches = seasonMatches
+      .filter((match) => {
+        const homeName = String(
+          match?.homeTeam?.name || match?.homeTeam?.shortName || ""
+        ).toLowerCase();
+        const awayName = String(
+          match?.awayTeam?.name || match?.awayTeam?.shortName || ""
+        ).toLowerCase();
+        const competitionName = String(
+          match?.competition?.name || "Premier League"
+        ).toLowerCase();
+
+        return (
+          homeName.includes(term) ||
+          awayName.includes(term) ||
+          competitionName.includes(term)
+        );
+      })
+      .slice(0, 10)
+      .map((match) => {
+        const homeScore = match.score?.fullTime?.home ?? null;
+        const awayScore = match.score?.fullTime?.away ?? null;
+        const rawStatus = match.status || "SCHEDULED";
+        const shortStatus = {
+          FINISHED: "FT",
+          IN_PLAY: "LIVE",
+          PAUSED: "HT",
+          SCHEDULED: "NS",
+          TIMED: "NS",
+          POSTPONED: "PST",
+          SUSPENDED: "SUS",
+          CANCELLED: "CANC",
+        }[rawStatus] || rawStatus;
+
+        return {
+          id: match.id ?? null,
+          fixture: {
+            id: match.id ?? null,
+            date: match.utcDate || null,
+            status: {
+              short: shortStatus,
+              long: rawStatus,
+              elapsed: null,
+            },
+          },
+          league: {
+            id: match.competition?.id ?? null,
+            name: match.competition?.name || "Premier League",
+            code: match.competition?.code || "PL",
+            country: match.area?.name || "England",
+            logo: match.competition?.emblem || null,
+          },
+          home: {
+            id: match.homeTeam?.id ?? null,
+            name: match.homeTeam?.name || match.homeTeam?.shortName || "Home Team",
+            logo: match.homeTeam?.crest || null,
+          },
+          away: {
+            id: match.awayTeam?.id ?? null,
+            name: match.awayTeam?.name || match.awayTeam?.shortName || "Away Team",
+            logo: match.awayTeam?.crest || null,
+          },
+          goals: {
+            home: homeScore,
+            away: awayScore,
+          },
+          score: {
+            fulltime: {
+              home: homeScore,
+              away: awayScore,
+            },
+          },
+          status: {
+            short: shortStatus,
+            long: rawStatus,
+            elapsed: null,
+          },
+        };
+      });
+  } catch (error) {
+    console.warn(
+      "⚠️ Match search unavailable:",
+      error?.response?.status || error?.message
+    );
+  }
 
   const result = {
     teams: [
@@ -1335,7 +1439,7 @@ async function searchFootball(
         20
       ),
 
-    matches: [],
+    matches,
   };
 
   setCachedSearch(
