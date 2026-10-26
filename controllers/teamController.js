@@ -8,7 +8,9 @@ const {
 CONFIGURATION
 ===================================================== */
 
-const DEFAULT_SEASON = 2025;
+const DEFAULT_SEASON = new Date().getMonth() >= 6
+  ? new Date().getFullYear()
+  : new Date().getFullYear() - 1;
 
 const LEAGUES = {
   epl: {
