@@ -21,7 +21,9 @@ function resolveFootballDataSeason(requestedSeason) {
   const season = parseInt(requestedSeason, 10);
 
   if (Number.isNaN(season)) {
-    return new Date().getFullYear();
+    return new Date().getMonth() >= 6
+      ? new Date().getFullYear()
+      : new Date().getFullYear() - 1;
   }
 
   return season;
