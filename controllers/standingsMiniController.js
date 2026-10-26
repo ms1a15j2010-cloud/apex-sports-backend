@@ -64,7 +64,9 @@ exports.getStandingsMini = async (
     const season =
       Number(
         req.query.season
-      ) || 2025;
+      ) || (new Date().getMonth() >= 6
+        ? new Date().getFullYear()
+        : new Date().getFullYear() - 1);
 
     console.log(
       `📊 Loading mini standings | ${leagueSlug} | Season ${season}`
