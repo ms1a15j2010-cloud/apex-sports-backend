@@ -81,7 +81,9 @@ exports.getTopLeagues =
         requestedSeason >= 1900 &&
         requestedSeason <= 2100
           ? requestedSeason
-          : new Date().getFullYear();
+          : (new Date().getMonth() >= 6
+              ? new Date().getFullYear()
+              : new Date().getFullYear() - 1);
 
       console.log(
         `🏆 Loading top leagues from football-data.org | Season: ${season}`
