@@ -718,7 +718,9 @@ async function getHeadToHead(
   ================================================= */
 
   const currentYear =
-    new Date().getFullYear();
+    new Date().getMonth() >= 6
+      ? new Date().getFullYear()
+      : new Date().getFullYear() - 1;
 
   const startingSeason =
     validRequestedSeason ||
