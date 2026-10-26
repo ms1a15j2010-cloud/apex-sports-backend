@@ -252,7 +252,9 @@ app.get(
         seasonParam >= 1900 &&
         seasonParam <= 2100
           ? seasonParam
-          : new Date().getFullYear();
+          : (new Date().getMonth() >= 6
+              ? new Date().getFullYear()
+              : new Date().getFullYear() - 1);
 
       const matches =
         await getFinishedMatches({
