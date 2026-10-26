@@ -64,7 +64,9 @@ function resolveSeason(
     return season;
   }
 
-  return new Date().getFullYear();
+  return new Date().getMonth() >= 6
+    ? new Date().getFullYear()
+    : new Date().getFullYear() - 1;
 }
 
 
