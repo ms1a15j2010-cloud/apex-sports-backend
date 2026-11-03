@@ -648,24 +648,30 @@ exports.getFixtures =
          provider results and make debugging confusing.
       ============================================= */
 
+      // This endpoint powers the Upcoming Fixtures page. Provider
+      // records can retain a scheduled status after kickoff has passed,
+      // so use the actual UTC kickoff timestamp as the final safeguard.
+      const now = Date.now();
+
+      const upcomingMatches =
+        matches.filter((match) => {
+          const kickoff = Date.parse(match?.utcDate || "");
+          const status = String(match?.status || "").toUpperCase();
+
+          return (
+            Number.isFinite(kickoff) &&
+            kickoff >= now &&
+            (status === "SCHEDULED" || status === "TIMED")
+          );
+        });
+
       const sortedMatches =
-        [...matches].sort(
-          (a, b) => {
-            const dateA =
-              new Date(
-                a?.utcDate || 0
-              ).getTime();
-
-            const dateB =
-              new Date(
-                b?.utcDate || 0
-              ).getTime();
-
-            return (
-              dateA - dateB
-            );
-          }
-        );
+        [...upcomingMatches].sort((a, b) => {
+          return (
+            Date.parse(a?.utcDate || "") -
+            Date.parse(b?.utcDate || "")
+          );
+        });
 
       /* =============================================
          FORMAT
@@ -722,33 +728,36 @@ exports.getFixtures =
          LEAGUE INFORMATION
       ============================================= */
 
+      // Keep league and season metadata even when every provider
+      // fixture has already kicked off and the upcoming list is empty.
       const firstMatch =
         sortedMatches[0] ||
+        matches[0] ||
         null;
 
       const competition =
+        response?.competition ||
         firstMatch?.competition ||
         {};
 
       const area =
         firstMatch?.area ||
+        competition?.area ||
         {};
 
       const seasonData =
         firstMatch?.season ||
+        response?.season ||
         {};
+
+      const responseSeason = Number(response?.filters?.season);
 
       const actualSeason =
         seasonData?.startDate
-          ? Number(
-              String(
-                seasonData.startDate
-              ).substring(
-                0,
-                4
-              )
-            )
-          : requestedSeason;
+          ? Number(String(seasonData.startDate).substring(0, 4))
+          : Number.isInteger(responseSeason) && responseSeason >= 2000
+            ? responseSeason
+            : requestedSeason;
 
       const leagueInfo = {
         id:
