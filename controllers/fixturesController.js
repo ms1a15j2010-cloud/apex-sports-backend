@@ -728,33 +728,36 @@ exports.getFixtures =
          LEAGUE INFORMATION
       ============================================= */
 
+      // Keep league and season metadata even when every provider
+      // fixture has already kicked off and the upcoming list is empty.
       const firstMatch =
         sortedMatches[0] ||
+        matches[0] ||
         null;
 
       const competition =
+        response?.competition ||
         firstMatch?.competition ||
         {};
 
       const area =
         firstMatch?.area ||
+        competition?.area ||
         {};
 
       const seasonData =
         firstMatch?.season ||
+        response?.season ||
         {};
+
+      const responseSeason = Number(response?.filters?.season);
 
       const actualSeason =
         seasonData?.startDate
-          ? Number(
-              String(
-                seasonData.startDate
-              ).substring(
-                0,
-                4
-              )
-            )
-          : requestedSeason;
+          ? Number(String(seasonData.startDate).substring(0, 4))
+          : Number.isInteger(responseSeason) && responseSeason >= 2000
+            ? responseSeason
+            : requestedSeason;
 
       const leagueInfo = {
         id:
