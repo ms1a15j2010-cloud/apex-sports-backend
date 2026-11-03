@@ -236,20 +236,35 @@ function formatScorer(
   const team =
     scorer.team || {};
 
-  const goals =
-    Number(
-      scorer.goals
-    ) || 0;
+  const goalsValue = Number(scorer.goals);
+  const goals = Number.isFinite(goalsValue) ? goalsValue : 0;
 
+  const assistsValue =
+    scorer.assists === null || scorer.assists === undefined
+      ? null
+      : Number(scorer.assists);
   const assists =
-    Number(
-      scorer.assists
-    ) || 0;
+    assistsValue !== null && Number.isFinite(assistsValue)
+      ? assistsValue
+      : null;
 
+  const appearancesValue =
+    scorer.playedMatches === null || scorer.playedMatches === undefined
+      ? null
+      : Number(scorer.playedMatches);
+  const appearances =
+    appearancesValue !== null && Number.isFinite(appearancesValue)
+      ? appearancesValue
+      : null;
+
+  const penaltiesValue =
+    scorer.penalties === null || scorer.penalties === undefined
+      ? null
+      : Number(scorer.penalties);
   const penalties =
-    Number(
-      scorer.penalties
-    ) || 0;
+    penaltiesValue !== null && Number.isFinite(penaltiesValue)
+      ? penaltiesValue
+      : null;
 
   return {
     /* ===============================================
@@ -346,12 +361,12 @@ function formatScorer(
         },
 
         games: {
-          appearances: 0,
+          appearances,
 
           /*
            * Old frontend spelling.
            */
-          appearences: 0,
+          appearences: appearances,
 
           lineups: 0,
 
