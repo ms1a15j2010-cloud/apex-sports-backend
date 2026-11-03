@@ -648,24 +648,30 @@ exports.getFixtures =
          provider results and make debugging confusing.
       ============================================= */
 
+      // This endpoint powers the Upcoming Fixtures page. Provider
+      // records can retain a scheduled status after kickoff has passed,
+      // so use the actual UTC kickoff timestamp as the final safeguard.
+      const now = Date.now();
+
+      const upcomingMatches =
+        matches.filter((match) => {
+          const kickoff = Date.parse(match?.utcDate || "");
+          const status = String(match?.status || "").toUpperCase();
+
+          return (
+            Number.isFinite(kickoff) &&
+            kickoff >= now &&
+            (status === "SCHEDULED" || status === "TIMED")
+          );
+        });
+
       const sortedMatches =
-        [...matches].sort(
-          (a, b) => {
-            const dateA =
-              new Date(
-                a?.utcDate || 0
-              ).getTime();
-
-            const dateB =
-              new Date(
-                b?.utcDate || 0
-              ).getTime();
-
-            return (
-              dateA - dateB
-            );
-          }
-        );
+        [...upcomingMatches].sort((a, b) => {
+          return (
+            Date.parse(a?.utcDate || "") -
+            Date.parse(b?.utcDate || "")
+          );
+        });
 
       /* =============================================
          FORMAT
