@@ -335,15 +335,15 @@ function formatFeaturedMatch(match) {
 
 
 /* =====================================================
-GET CURRENT PAKISTAN DATE
+GET CURRENT UK DATE
 ===================================================== */
 
-function getPakistanDate() {
+function getLondonDate() {
   return new Intl.DateTimeFormat(
     "en-CA",
     {
       timeZone:
-        "Asia/Karachi",
+        "Europe/London",
 
       year: "numeric",
 
@@ -446,7 +446,7 @@ exports.getFeaturedMatch =
       ============================================= */
 
       const today =
-        getPakistanDate();
+        getLondonDate();
 
       /*
        * dateTo is exclusive in football-data.org.
