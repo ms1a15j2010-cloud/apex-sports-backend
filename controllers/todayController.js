@@ -32,10 +32,10 @@ No fake matches are generated.
 
 
 /* =====================================================
-GET PAKISTAN DATE
+GET UK DATE
 
 If the frontend does not provide ?date=YYYY-MM-DD,
-use the current calendar date in Pakistan.
+use the current calendar date in the United Kingdom.
 
 Examples:
 
@@ -43,12 +43,12 @@ Examples:
 2026-08-14
 ===================================================== */
 
-function getPakistanDate() {
+function getLondonDate() {
   return new Intl.DateTimeFormat(
     "en-CA",
     {
       timeZone:
-        "Asia/Karachi",
+        "Europe/London",
 
       year: "numeric",
 
@@ -473,7 +473,7 @@ exports.getTodayMatches =
 
       const requestedDate =
         req.query.date ||
-        getPakistanDate();
+        getLondonDate();
 
       if (
         !isValidDate(
@@ -735,7 +735,7 @@ exports.getTodayMatches =
 
           date:
             req.query.date ||
-            getPakistanDate(),
+            getLondonDate(),
 
           count: 0,
 
@@ -761,7 +761,7 @@ exports.getTodayMatches =
 
         date:
           req.query.date ||
-          getPakistanDate(),
+          getLondonDate(),
 
         count: 0,
 
