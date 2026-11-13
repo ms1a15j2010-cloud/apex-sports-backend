@@ -251,7 +251,7 @@ async function getLiveMatches() {
       "en-CA",
       {
         timeZone:
-          "Asia/Karachi",
+          "Europe/London",
 
         year: "numeric",
 
