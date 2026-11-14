@@ -266,13 +266,13 @@ function buildPlayer(
     profile || {};
 
   const goals =
-    scorer?.goals ?? 0;
+    scorer?.goals ?? null;
 
   const assists =
-    scorer?.assists ?? 0;
+    scorer?.assists ?? null;
 
   const appearances =
-    scorer?.playedMatches ?? 0;
+    scorer?.playedMatches ?? null;
 
   return {
     /* =================================================
@@ -382,90 +382,72 @@ function buildPlayer(
           teamData,
 
         games: {
-          appearances:
-            num(appearances),
-
-          lineups:
-            0,
-
-          minutes:
-            0,
-
-          number:
-            playerData?.shirtNumber ??
-            null,
-
-          position:
-            playerData?.position ||
-            "",
-
-          rating:
-            "",
+          appearances,
+          lineups: null,
+          minutes: null,
+          number: playerData?.shirtNumber ?? null,
+          position: playerData?.position || null,
+          rating: null,
         },
 
         substitutes: {
-          in: 0,
-          out: 0,
-          bench: 0,
+          in: null,
+          out: null,
+          bench: null,
         },
 
         shots: {
-          total: 0,
-          on: 0,
+          total: null,
+          on: null,
         },
 
         goals: {
-          total:
-            num(goals),
-
-          conceded: 0,
-
-          assists:
-            num(assists),
-
-          saves: 0,
+          total: goals,
+          conceded: null,
+          assists,
+          saves: null,
         },
 
         passes: {
-          total: 0,
-          key: 0,
-          accuracy: "",
+          total: null,
+          key: null,
+          accuracy: null,
         },
 
         tackles: {
-          total: 0,
-          blocks: 0,
-          interceptions: 0,
+          total: null,
+          blocks: null,
+          interceptions: null,
         },
 
         duels: {
-          total: 0,
-          won: 0,
+          total: null,
+          won: null,
         },
 
         dribbles: {
-          attempts: 0,
-          success: 0,
-          past: 0,
+          attempts: null,
+          success: null,
+          past: null,
         },
 
         fouls: {
-          drawn: 0,
-          committed: 0,
+          drawn: null,
+          committed: null,
         },
 
         cards: {
-          yellow: 0,
-          yellowred: 0,
-          red: 0,
+          yellow: null,
+          yellowred: null,
+          red: null,
         },
 
         penalty: {
-          won: 0,
-          committed: 0,
-          scored: 0,
-          missed: 0,
-          saved: 0,
+          won: null,
+          committed: null,
+          scored: null,
+          missed: null,
+          saved: null,
         },
       },
     ],
